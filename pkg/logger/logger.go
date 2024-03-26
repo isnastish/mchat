@@ -9,36 +9,8 @@ import (
 )
 
 type Logger struct {
-	logLevel string
-	logger   zerolog.Logger
-}
-
-func (l Logger) Debug() *zerolog.Event {
-	return l.logger.Debug()
-}
-
-func (l Logger) Info() *zerolog.Event {
-	return l.logger.Info()
-}
-
-func (l Logger) Warn() *zerolog.Event {
-	return l.logger.Warn()
-}
-
-func (l Logger) Error() *zerolog.Event {
-	return l.logger.Error()
-}
-
-func (l Logger) Fatal() *zerolog.Event {
-	return l.logger.Fatal()
-}
-
-func (l Logger) Panic() *zerolog.Event {
-	return l.logger.Panic()
-}
-
-func (l Logger) Trace() *zerolog.Event {
-	return l.logger.Trace()
+	level string
+	zerolog.Logger
 }
 
 func setLogLevel(logLevel string) error {
@@ -61,12 +33,14 @@ func setLogLevel(logLevel string) error {
 	return fmt.Errorf("undefined log level: %s", logLevel)
 }
 
-func NewLogger(logLevel string) *Logger {
+func NewLogger(logLevel string) Logger {
 	zerolog.TimeFieldFormat = time.RFC822
 
 	logLevel = strings.ToLower(logLevel)
 	if err := setLogLevel(logLevel); err != nil {
 		fmt.Printf("failed to set global log level: %v", err.Error())
+	} else {
+		setLogLevel("debug")
 	}
 
 	output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC822}
@@ -81,9 +55,9 @@ func NewLogger(logLevel string) *Logger {
 	}
 
 	logger := Logger{
-		logLevel: logLevel,
-		logger:   zerolog.New(output).With().Timestamp().Logger(),
+		level:  logLevel,
+		Logger: zerolog.New(output).With().Timestamp().Logger(),
 	}
 
-	return &logger
+	return logger
 }

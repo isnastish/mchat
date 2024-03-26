@@ -1,37 +1,66 @@
 package main
 
+// TODO: Implement retries, If client failed to connect to the session
+// Set maximum retries limit.
+
 import (
+	"bufio"
 	"flag"
 	"fmt"
-	log "github.com/isnastish/chat/pkg/logger"
 	"io"
 	"net"
 	"os"
-	"time"
+	"strings"
+	_ "time"
+
+	log "github.com/isnastish/chat/pkg/logger"
 )
 
 type ClientState struct {
-	logger *log.Logger
-
 	network string
 	address string
+	logger  log.Logger
 }
 
 var client ClientState
 
 func recvMessages(serverConn net.Conn, done chan struct{}) {
-	if _, err := io.Copy(os.Stdout, serverConn); err != nil {
-		done <- struct{}{}
+	input := bufio.NewScanner(serverConn)
+	for input.Scan() { // blocks
+		text := input.Text()
+
+		// TODO: Limit a user name to 64 characters.
+		if strings.EqualFold(text, "username:") {
+			client.logger.Info().Msg("reading username")
+
+			reader := bufio.NewReader(os.Stdin)
+			if username, err := reader.ReadString('\n'); err != nil {
+				done <- struct{}{}
+			} else {
+				if _, err := io.WriteString(serverConn, fmt.Sprintf("username: %s", username)); err != nil {
+					done <- struct{}{}
+					return
+				}
+			}
+		} else {
+			io.WriteString(os.Stdout, text)
+		}
 	}
+
+	done <- struct{}{}
+
+	// if _, err := io.Copy(os.Stdout, serverConn); err != nil {
+	// 	done <- struct{}{}
+	// }
 }
 
 func sendMessages(serverConn net.Conn, done chan struct{}) {
-	for {
-		if _, err := io.WriteString(serverConn, fmt.Sprintf("addr[%s]: hello\n", serverConn.LocalAddr().String())); err != nil {
-			done <- struct{}{}
-		}
-		time.Sleep(3000 * time.Millisecond)
-	}
+	// for {
+	// 	if _, err := io.WriteString(serverConn, fmt.Sprintf("addr[%s]: hello\n", serverConn.LocalAddr().String())); err != nil {
+	// 		done <- struct{}{}
+	// 	}
+	// 	time.Sleep(3000 * time.Millisecond)
+	// }
 }
 
 func main() {
