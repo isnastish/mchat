@@ -1,88 +1,94 @@
-package main
+package client
 
-// TODO: Implement retries, If client failed to connect to the session
-// Set maximum retries limit.
+// TODO: Add maximum retries limit.
 
 import (
 	"bufio"
-	"flag"
-	"fmt"
 	"io"
 	"net"
 	"os"
-	"strings"
+	"sync"
 
-	log "github.com/isnastish/chat/pkg/logger"
+	l "github.com/isnastish/chat/pkg/logger"
 )
 
-type ClientState struct {
-	network string
-	address string
-	logger  log.Logger
+type Client struct {
+	remoteConn net.Conn
+	network    string
+	address    string
+	log        l.Logger
 }
 
-var client ClientState
+func NewClient(network, address string) *Client {
+	log := l.NewLogger("debug")
 
-func recvMessages(serverConn net.Conn, done chan struct{}) {
-	input := bufio.NewScanner(serverConn)
-	for input.Scan() { // blocks
-		text := input.Text()
+	remoteConn, err := net.Dial(network, address)
+	if err != nil {
+		log.Error().Msgf("failed to connected to the server: %s", err.Error())
+		// remoteConn.Close()
+		os.Exit(-1)
+	} else {
+		log.Info().Msgf("connected to remote session: %s", remoteConn.RemoteAddr().String())
+	}
 
-		// TODO: Limit a user name to 64 characters.
-		if strings.EqualFold(text, "username:") {
-			client.logger.Info().Msg("reading username")
+	return &Client{
+		log:        log,
+		network:    network,
+		address:    address,
+		remoteConn: remoteConn,
+	}
+}
 
-			reader := bufio.NewReader(os.Stdin)
-			if username, err := reader.ReadString('\n'); err != nil {
-				done <- struct{}{}
-			} else {
-				if _, err := io.WriteString(serverConn, fmt.Sprintf("username: %s", username)); err != nil {
-					done <- struct{}{}
-					return
-				}
-			}
-		} else {
-			io.WriteString(os.Stdout, text)
+func (c *Client) Run() {
+	wg := sync.WaitGroup{} // make it a part of a client so we just call go c.recv()/ go c.send()
+	wg.Add(2)
+
+	go func() {
+		c.recv()
+		wg.Done()
+	}()
+
+	go func() {
+		c.send()
+		wg.Done()
+	}()
+
+	wg.Wait()
+	c.remoteConn.Close()
+}
+
+func (c *Client) recv() {
+	buf := make([]byte, 4096)
+
+	for {
+		nBytes, err := c.remoteConn.Read(buf)
+		if err != nil && err != io.EOF {
+			c.log.Error().Msgf("failed to read from the remote connnection: %s", err.Error())
+			// should we shutdown this client or handle it more gracefully?
+			// Since send() function is still running, we cannot cancel recv function.
+			break
+		}
+
+		c.log.Info().Msgf("%s", string(buf[:nBytes]))
+	}
+}
+
+func (c *Client) send() {
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		text := scanner.Text()
+		c.log.Info().Msgf("sending message: %s", text)
+
+		nBytes, err := c.remoteConn.Write([]byte(text))
+		c.log.Info().Int("count", nBytes).Msg("wrote bytes")
+
+		if err != nil {
+			c.log.Error().Msgf("failed to write to remote connection: %s", err.Error())
+			return
 		}
 	}
 
-	done <- struct{}{}
-
-	// if _, err := io.Copy(os.Stdout, serverConn); err != nil {
-	// 	done <- struct{}{}
-	// }
-}
-
-func sendMessages(serverConn net.Conn, done chan struct{}) {
-	// for {
-	// 	if _, err := io.WriteString(serverConn, fmt.Sprintf("addr[%s]: hello\n", serverConn.LocalAddr().String())); err != nil {
-	// 		done <- struct{}{}
-	// 	}
-	// 	time.Sleep(3000 * time.Millisecond)
-	// }
-}
-
-func main() {
-	client = ClientState{
-		logger: log.NewLogger("debug"),
+	if scanner.Err() != nil {
+		c.log.Error().Msgf("scanner failed to read: %s", scanner.Err().Error())
 	}
-
-	flag.StringVar(&client.network, "network", "tcp", "Network protocol [TCP|UDP]")
-	flag.StringVar(&client.address, "address", "127.0.0.1:8080", "Address, for example: localhost:8080")
-
-	flag.Parse()
-
-	serverConn, err := net.Dial(client.network, client.address)
-	if err != nil {
-		client.logger.Error().Msgf("failed to connected to the server: %v", err)
-	}
-
-	client.logger.Info().Str("Server address", serverConn.RemoteAddr().String()).Msg("connected to the server")
-
-	done := make(chan struct{})
-	go recvMessages(serverConn, done)
-	go sendMessages(serverConn, done)
-	<-done
-
-	serverConn.Close()
 }
