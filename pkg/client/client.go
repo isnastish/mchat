@@ -11,7 +11,6 @@ import (
 	"net"
 	"os"
 	"strings"
-	_ "time"
 
 	log "github.com/isnastish/chat/pkg/logger"
 )
