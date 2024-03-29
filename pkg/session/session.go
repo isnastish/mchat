@@ -9,7 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	l "github.com/isnastish/chat/pkg/logger"
+	lgr "github.com/isnastish/chat/pkg/logger"
+	sts "github.com/isnastish/chat/pkg/stats"
 )
 
 type Client struct {
@@ -42,9 +43,11 @@ type Session struct {
 	ctx                 context.Context
 	cancelCtx           context.CancelFunc
 	quitCh              chan struct{}
+
+	stats sts.Stats
 }
 
-var log = l.NewLogger("debug")
+var log = lgr.NewLogger("debug")
 
 func NewSession(networkProtocol, address string) *Session {
 	const timeout = 10000 * time.Millisecond
@@ -113,6 +116,8 @@ Loop:
 
 		go s.handleConnection(conn)
 	}
+
+	sts.DisplayStats(&s.stats, sts.Session)
 }
 
 func disconnectIfClientWasIdle(conn net.Conn, abortCh, quitCh chan struct{}) {
@@ -219,6 +224,8 @@ func (s *Session) processConnections() {
 	for s.running {
 		select {
 		case client := <-s.onSessionJoinedCh:
+			s.stats.ClientsJoined.Add(1)
+
 			log.Info().Msgf("client joined the session: %s", client.name)
 			{
 				s.clients[client.name] = client
@@ -230,6 +237,8 @@ func (s *Session) processConnections() {
 			}
 
 		case name := <-s.onSessionLeftCh:
+			s.stats.ClientsLeft.Add(1)
+
 			log.Info().Msgf("client left the session: %s", name)
 			{
 				s.clients[name].connected = false
@@ -242,6 +251,8 @@ func (s *Session) processConnections() {
 			}
 
 		case client := <-s.onSessionRejoinedCh:
+			s.stats.ClientsRejoined.Add(1)
+
 			log.Info().Msgf("client rejoined the session: %s", client.name)
 			{
 				s.clients[client.name].connected = true
@@ -253,10 +264,14 @@ func (s *Session) processConnections() {
 			}
 
 		case msg := <-s.messagesCh:
+			s.stats.MessagesReceived.Add(1)
+
 			log.Info().Msgf("[%s]: received message: %s", msg.sender, string(msg.data))
 			{
 				msgStr := fmt.Sprintf("[%s]: %s", msg.sender, string(msg.data))
 				msgBytes := []byte(msgStr)
+
+				// broadcast the message to all connected clients, acept sender
 
 				// TODO: Disconnect idle clients.
 				// If we were not receiving any messages for some amount of time, let's say 30 seconds,
@@ -279,6 +294,8 @@ func (s *Session) processConnections() {
 							}
 							nBytes += n
 						}
+
+						s.stats.MessagesSent.Add(1)
 					}
 				}
 			}

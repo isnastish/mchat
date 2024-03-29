@@ -2,33 +2,38 @@ package client
 
 import (
 	"bufio"
-	l "github.com/isnastish/chat/pkg/logger"
 	"io"
 	"net"
 	"os"
-	_ "strings"
-	"sync"
 	"time"
+
+	lgr "github.com/isnastish/chat/pkg/logger"
+	sts "github.com/isnastish/chat/pkg/stats"
 )
 
-// TODO: Implement inboxes and outboxes
-
 const retriesCount int32 = 5
+
+type Message struct {
+	data []byte
+}
 
 type Client struct {
 	remoteConn net.Conn
 	network    string
 	address    string
-	log        l.Logger
+	// log        l.Logger
 
-	inputCh chan []byte
-	quitCh  chan struct{}
-	wg      sync.WaitGroup
+	quitCh chan struct{}
+
+	incommingCh chan Message
+	outgoingCh  chan Message
+
+	stats sts.Stats
 }
 
-func NewClient(network, address string) (*Client, error) {
-	log := l.NewLogger("debug")
+var log = lgr.NewLogger("debug")
 
+func NewClient(network, address string) (*Client, error) {
 	var remoteConn net.Conn
 	var nretries int32
 	var lastErr error
@@ -50,89 +55,100 @@ func NewClient(network, address string) (*Client, error) {
 	}
 
 	c := Client{
-		log:        log,
+		// log:        log,
 		network:    network,
 		address:    address,
 		remoteConn: remoteConn,
 
-		inputCh: make(chan []byte),
-		quitCh:  make(chan struct{}),
+		quitCh: make(chan struct{}),
 
-		wg: sync.WaitGroup{},
+		// a message can be a struct with time and data ([]byte) members,
+		// to signify when the messages arrived.
+
+		incommingCh: make(chan Message),
+		outgoingCh:  make(chan Message),
 	}
 
 	return &c, nil
 }
 
 func (c *Client) Run() {
-	c.wg.Add(2)
-
 	go c.recv()
 	go c.send()
 
-	c.wg.Wait()
+Loop:
+	for {
+		select {
+		case inMsg := <-c.incommingCh:
+			c.stats.MessagesReceived.Add(1)
+
+			log.Info().Msg("received message")
+			{
+				log.Info().Msg(string(inMsg.data))
+			}
+
+		case outMsg := <-c.outgoingCh:
+			c.stats.MessagesSent.Add(1)
+
+			log.Info().Msg("sending message")
+			{
+				nbytes, err := c.remoteConn.Write(outMsg.data)
+				log.Info().Int("count", nbytes).Msg("wrote bytes")
+				if err != nil {
+					log.Error().Msgf("failed to write to remote connection: %s", err.Error())
+					// return
+				}
+			}
+		case <-c.quitCh:
+			break Loop
+		}
+	}
+
 	c.remoteConn.Close()
+
+	sts.DisplayStats(&c.stats, sts.Client)
 }
 
 func (c *Client) recv() {
-	defer c.wg.Done()
-
 	buf := make([]byte, 4096)
 
 	for {
 		// If the client has been disconnected manually, we have to shutdown it completely
-		nBytes, err := c.remoteConn.Read(buf)
+		nbytes, err := c.remoteConn.Read(buf)
 		if err != nil && err != io.EOF {
-			c.log.Error().Msgf("failed to read from the remote connnection: %s", err.Error())
+			log.Error().Msgf("failed to read from the remote connnection: %s", err.Error())
 			// should we shutdown this client or handle it more gracefully?
 			// Since send() function is still running, we cannot cancel recv function.
 			break
 		}
 
-		if nBytes == 0 {
-			c.log.Info().Msg("remote session closed the connection")
+		if nbytes == 0 {
+			log.Info().Msg("remote session closed the connection")
 			// force the send() goroutine to complete
 			close(c.quitCh)
 			return
 		}
 
-		c.log.Info().Msgf("%s", string(buf[:nBytes]))
-	}
-}
+		// log.Info().Msgf("%s", string(buf[:nBytes]))
+		// c.incommingCh <- buf[:nBytes]
 
-func (c *Client) readInput() {
-	inputReader := bufio.NewReader(os.Stdin)
-	buf := make([]byte, 4096)
-
-	for {
-		nbytes, err := inputReader.Read(buf)
-		if err != nil && err != io.EOF {
-			c.log.Error().Msg("failed to read the input")
-			break
-		}
-
-		c.log.Info().Str("contents", string(buf[:nbytes])).Msg("input received")
-
-		c.inputCh <- buf[:nbytes]
+		c.incommingCh <- Message{data: buf[:nbytes]}
 	}
 }
 
 func (c *Client) send() {
-	defer c.wg.Done()
-	go c.readInput()
+	buf := make([]byte, 4096)
+	inputReader := bufio.NewReader(os.Stdin)
 
-Loop:
 	for {
-		select {
-		case msg := <-c.inputCh:
-			nBytes, err := c.remoteConn.Write(msg)
-			c.log.Info().Int("count", nBytes).Msg("wrote bytes")
-			if err != nil {
-				c.log.Error().Msgf("failed to write to remote connection: %s", err.Error())
-				return
-			}
-		case <-c.quitCh:
-			break Loop
+		nbytes, err := inputReader.Read(buf)
+		if err != nil && err != io.EOF {
+			log.Error().Msg("failed to read the input")
+			break
 		}
+
+		log.Info().Str("contents", string(buf[:nbytes])).Msg("input received")
+
+		c.outgoingCh <- Message{data: buf[:nbytes]}
 	}
 }
