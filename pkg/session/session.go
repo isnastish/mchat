@@ -25,7 +25,7 @@ type Message struct {
 }
 
 type Session struct {
-	log                 l.Logger
+	// log                 l.Logger
 	clients             map[string]*Client
 	timer               *time.Timer
 	duration            time.Duration
@@ -44,10 +44,10 @@ type Session struct {
 	quitCh              chan struct{}
 }
 
+var log = l.NewLogger("debug")
+
 func NewSession(networkProtocol, address string) *Session {
 	const timeout = 10000 * time.Millisecond
-
-	log := l.NewLogger("debug")
 
 	ctx, cancelCtx := context.WithCancel(context.Background())
 
@@ -63,7 +63,7 @@ func NewSession(networkProtocol, address string) *Session {
 	}
 
 	return &Session{
-		log:                 log,
+		// log:                 log,
 		clients:             make(map[string]*Client),
 		duration:            timeout,
 		timer:               time.NewTimer(timeout),
@@ -84,7 +84,7 @@ func NewSession(networkProtocol, address string) *Session {
 func (s *Session) AcceptConnection() {
 	go s.processConnections()
 
-	s.log.Info().Msgf("accepting connections: %s", s.listener.Addr().String())
+	log.Info().Msgf("accepting connections: %s", s.listener.Addr().String())
 
 	go func() {
 		<-s.timeoutCh
@@ -106,7 +106,7 @@ Loop:
 			case <-s.quitCh:
 				break Loop
 			default:
-				s.log.Warn().Msgf("client failed to connect: %s", conn.RemoteAddr().String())
+				log.Warn().Msgf("client failed to connect: %s", conn.RemoteAddr().String())
 			}
 			continue
 		}
@@ -115,10 +115,42 @@ Loop:
 	}
 }
 
+func disconnectIfClientWasIdle(conn net.Conn, abortCh, quitCh chan struct{}) {
+	const duration = 10000 * time.Millisecond // 10s (for test)
+	timeout := time.NewTimer(duration)
+
+	for {
+		select {
+		case <-timeout.C:
+			// Close closes the connection.
+			// Any blocked Read or Write operations will be unblocked and return errors.
+			{
+				close(quitCh)
+				conn.Close()
+			}
+		case <-abortCh:
+			log.Info().Msg("timeout aborted")
+			{
+				if !timeout.Stop() {
+					<-timeout.C // drain the channel (might block)
+				}
+				log.Info().Msg("channel was drained")
+				// Should only be invoked on expired timers with drained channels
+				timeout.Reset(duration)
+			}
+		}
+	}
+}
+
 func (s *Session) handleConnection(conn net.Conn) {
 	// NOTE: Each client should have its own channel for pushing messages,
 	// so we don't overload the main s.messagesCh channel
 	// outgoing := make(chan Message)
+
+	abortCh := make(chan struct{})
+	quitCh := make(chan struct{})
+
+	go disconnectIfClientWasIdle(conn, abortCh, quitCh)
 
 	connName := conn.RemoteAddr().String()
 	conn.Write([]byte(fmt.Sprintf("your username: %s", connName)))
@@ -137,23 +169,47 @@ func (s *Session) handleConnection(conn net.Conn) {
 	buf := make([]byte, 4096)
 
 	for {
-		nBytes, err := conn.Read(buf) // blocks?
+		nBytes, err := conn.Read(buf)
 		if err != nil && err != io.EOF {
-			s.log.Error().Msgf("failed to read bytes from the client: %s", err.Error())
+			// Do determine whether it was an error or it's we who closed the connection.
+			// We would have to multiplex.
+			select {
+			case <-quitCh:
+				// Send a message to a client that it has been idle for long period of time,
+				// and thus was disconnected from the session.
+				log.Error().Msgf("client has been idle for too long, disconnecting")
+			default:
+				log.Error().Msgf("failed to read bytes from the client: %s", err.Error())
+			}
 			break
 		}
 
-		s.log.Info().Int("count", nBytes).Msg("read bytes")
+		// // figure out when do we read zero bytes.
+		// if nBytes == 0 {
+		// 	break
+		// }
+
+		// Introduce a better name
+		abortCh <- struct{}{}
+
+		// Would it be possible to serialize the message, send it as bytes,
+		// and then deserialize it on the client side?
+		// so, the message would have a header and a body
+		// containing an actual contents.
+
+		log.Info().Int("count", nBytes).Msg("read bytes")
 		s.messagesCh <- Message{
 			sender: connName,
 			data:   buf[:nBytes],
 		}
 	}
 
-	s.log.Info().Msg("sending connection leave message")
+	log.Info().Msg("sending connection leave message")
 	s.onSessionLeftCh <- connName
-	s.log.Info().Msg("message about client leaving was sent")
+	log.Info().Msg("message about client leaving was sent")
 	s.messagesCh <- Message{sender: connName, data: []byte("left")}
+
+	// Verify what happens if the connection was already closed
 	conn.Close()
 }
 
@@ -163,18 +219,18 @@ func (s *Session) processConnections() {
 	for s.running {
 		select {
 		case client := <-s.onSessionJoinedCh:
-			s.log.Info().Msgf("client joined the session: %s", client.name)
+			log.Info().Msgf("client joined the session: %s", client.name)
 			{
 				s.clients[client.name] = client
 				s.nClients.Add(1)
 
 				if s.timer.Stop() {
-					s.log.Info().Msg("the timer was stopped from firing")
+					log.Info().Msg("the timer was stopped from firing")
 				}
 			}
 
 		case name := <-s.onSessionLeftCh:
-			s.log.Info().Msgf("client left the session: %s", name)
+			log.Info().Msgf("client left the session: %s", name)
 			{
 				s.clients[name].connected = false
 				s.nClients.Add(-1)
@@ -186,7 +242,7 @@ func (s *Session) processConnections() {
 			}
 
 		case client := <-s.onSessionRejoinedCh:
-			s.log.Info().Msgf("client rejoined the session: %s", client.name)
+			log.Info().Msgf("client rejoined the session: %s", client.name)
 			{
 				s.clients[client.name].connected = true
 				s.clients[client.name].rejoined = true
@@ -197,7 +253,7 @@ func (s *Session) processConnections() {
 			}
 
 		case msg := <-s.messagesCh:
-			s.log.Info().Msgf("[%s]: received message: %s", msg.sender, string(msg.data))
+			log.Info().Msgf("[%s]: received message: %s", msg.sender, string(msg.data))
 			{
 				msgStr := fmt.Sprintf("[%s]: %s", msg.sender, string(msg.data))
 				msgBytes := []byte(msgStr)
@@ -207,10 +263,10 @@ func (s *Session) processConnections() {
 				// we have to disconnect that client.
 				for name, client := range s.clients {
 					if strings.Compare(name, msg.sender) != 0 { // Don't send a message back to its owner (find a way how to avoid string comparison)
-						s.log.Info().Msgf("wrote (%s) to client: %s", msg, name)
+						log.Info().Msgf("wrote (%s) to client: %s", msg, name)
 						nBytes, err := client.conn.Write(msgBytes)
 						if err != nil {
-							s.log.Error().Msgf("failed to write to client: %s", name)
+							log.Error().Msgf("failed to write to client: %s", name)
 							continue
 						}
 
@@ -218,7 +274,7 @@ func (s *Session) processConnections() {
 						for nBytes < len(msgBytes) {
 							n, err := client.conn.Write(msgBytes[nBytes:])
 							if err != nil {
-								s.log.Error().Msgf("failed to write to client: %s", name)
+								log.Error().Msgf("failed to write to client: %s", name)
 								break
 							}
 							nBytes += n
@@ -228,7 +284,7 @@ func (s *Session) processConnections() {
 			}
 
 		case <-s.timer.C:
-			s.log.Info().Msgf("timeout, no clients joined.")
+			log.Info().Msgf("timeout, no clients joined.")
 			{
 				s.running = false
 				close(s.timeoutCh)
@@ -238,17 +294,17 @@ func (s *Session) processConnections() {
 }
 
 func (s *Session) listParticipants(conn net.Conn) {
-	// TODO: Make it look prettier.
-
 	p := make([]string, len(s.clients))
 	for _, client := range s.clients {
+		// We can even display all the participants,
+		// and display whether they are connected or disconnected.
 		if client.connected {
 			p = append(p, client.name)
 		}
 	}
 
-	_, err := conn.Write([]byte(fmt.Sprintf("\n\nCurrent participants:\n%s", strings.Join(p, "\n"))))
+	_, err := conn.Write([]byte(fmt.Sprintf("\n\nParticipants:\n%s", strings.Join(p, "\n"))))
 	if err != nil {
-		s.log.Error().Msgf("failed to write participants list: %s", err.Error())
+		log.Error().Msgf("failed to write participants list: %s", err.Error())
 	}
 }

@@ -2,17 +2,11 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"github.com/isnastish/chat/pkg/client"
 )
 
 func main() {
-	// Each client should have an incoming and outgonig channels where he sends/receives messages
-	// incomingMessagesCh := make(chan Message)
-	// outgoinMessagesCh := make(chan Message)
-
-	// _ = incomingMessagesCh
-	// _ = outgoinMessagesCh
-
 	var network string
 	var address string
 
@@ -21,6 +15,11 @@ func main() {
 
 	flag.Parse()
 
-	c := client.NewClient(network, address)
+	c, err := client.NewClient(network, address)
+	if err != nil {
+		fmt.Printf("failed to create a client: %s\n", err.Error())
+		return
+	}
+
 	c.Run()
 }
