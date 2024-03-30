@@ -15,5 +15,5 @@ func main() {
 	flag.Parse()
 
 	s := session.NewSession(networkProtocol, address)
-	s.AcceptConnection()
+	s.AcceptConnections()
 }

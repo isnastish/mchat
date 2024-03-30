@@ -14,7 +14,6 @@ type Stats struct {
 	MessagesReceived atomic.Int32
 	MessagesSent     atomic.Int32
 
-	// experimental, not sure how to collect those metrics
 	MessagesDropped atomic.Int32
 
 	ClientsJoined   atomic.Int32 // should only be accessible by the server
@@ -46,7 +45,7 @@ func DisplayStats(s *Stats, who int) {
 			"Session's stats: "+
 				"\n\t|%-18s|: %d"+
 				"\n\t|%-18s|: %d"+
-				"\n\t|%-18s|: %d"+ // unused
+				"\n\t|%-18s|: %d"+
 				"\n\t|%-18s|: %d"+
 				"\n\t|%-18s|: %d"+
 				"\n\t|%-18s|: %d",

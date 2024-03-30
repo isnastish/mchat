@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	_ "bytes"
 	"io"
 	"net"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 const retriesCount int32 = 5
 
+// Pull out in a separate package shared by both, client and a server?
 type Message struct {
 	data []byte
 }
@@ -21,7 +23,6 @@ type Client struct {
 	remoteConn net.Conn
 	network    string
 	address    string
-	// log        l.Logger
 
 	quitCh chan struct{}
 
@@ -55,15 +56,11 @@ func NewClient(network, address string) (*Client, error) {
 	}
 
 	c := Client{
-		// log:        log,
 		network:    network,
 		address:    address,
 		remoteConn: remoteConn,
 
 		quitCh: make(chan struct{}),
-
-		// a message can be a struct with time and data ([]byte) members,
-		// to signify when the messages arrived.
 
 		incommingCh: make(chan Message),
 		outgoingCh:  make(chan Message),
@@ -79,33 +76,36 @@ func (c *Client) Run() {
 Loop:
 	for {
 		select {
-		case inMsg := <-c.incommingCh:
+		case msg := <-c.incommingCh:
 			c.stats.MessagesReceived.Add(1)
+			log.Info().Msgf("received message: %s", string(msg.data))
 
-			log.Info().Msg("received message")
-			{
-				log.Info().Msg(string(inMsg.data))
-			}
+		case msg := <-c.outgoingCh:
+			messageSize := len(msg.data)
 
-		case outMsg := <-c.outgoingCh:
-			c.stats.MessagesSent.Add(1)
-
-			log.Info().Msg("sending message")
-			{
-				nbytes, err := c.remoteConn.Write(outMsg.data)
-				log.Info().Int("count", nbytes).Msg("wrote bytes")
+			var bytesWritten int
+			for bytesWritten < messageSize {
+				n, err := c.remoteConn.Write(msg.data[bytesWritten:])
 				if err != nil {
-					log.Error().Msgf("failed to write to remote connection: %s", err.Error())
-					// return
+					log.Error().Msgf("failed to write to a remote connection: %s", err.Error())
+					break
 				}
+				bytesWritten += n
 			}
+			if bytesWritten == messageSize {
+				c.stats.MessagesSent.Add(1)
+			} else {
+				c.stats.MessagesDropped.Add(1)
+			}
+
+			log.Info().Msgf("sent message: %s", string(msg.data))
+
 		case <-c.quitCh:
 			break Loop
 		}
 	}
 
 	c.remoteConn.Close()
-
 	sts.DisplayStats(&c.stats, sts.Client)
 }
 
@@ -141,14 +141,22 @@ func (c *Client) send() {
 	inputReader := bufio.NewReader(os.Stdin)
 
 	for {
-		nbytes, err := inputReader.Read(buf)
+		bytesRead, err := inputReader.Read(buf)
 		if err != nil && err != io.EOF {
 			log.Error().Msg("failed to read the input")
 			break
 		}
 
-		log.Info().Str("contents", string(buf[:nbytes])).Msg("input received")
+		// TODO: Use bytes.CutSuffix instead.
+		// strip \r\n || \n\r
+		for back := bytesRead - 1; back >= 0; back-- {
+			if buf[back] == '\n' || buf[back] == '\r' {
+				bytesRead--
+				continue
+			}
+			break
+		}
 
-		c.outgoingCh <- Message{data: buf[:nbytes]}
+		c.outgoingCh <- Message{data: buf[:bytesRead]}
 	}
 }

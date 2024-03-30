@@ -47,9 +47,9 @@ func NewLogger(logLevel string) Logger {
 	output.FormatLevel = func(l interface{}) string {
 		return strings.ToUpper(fmt.Sprintf("|%s|", l))
 	}
-	output.FormatMessage = func(msg interface{}) string {
-		return fmt.Sprintf("Msg: %v", msg)
-	}
+	// output.FormatMessage = func(msg interface{}) string {
+	// 	return fmt.Sprintf("Msg: %v", msg)
+	// }
 	output.FormatFieldName = func(name interface{}) string {
 		return fmt.Sprintf("%s: ", name)
 	}
