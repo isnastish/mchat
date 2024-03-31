@@ -1,7 +1,10 @@
 package session
 
+// Give clients an ability to host their own sessions.
+
 import (
 	"context"
+	_ "database/sql"
 	"fmt"
 	"io"
 	"net"
@@ -9,28 +12,19 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/isnastish/chat/pkg/common"
 	lgr "github.com/isnastish/chat/pkg/logger"
 	sts "github.com/isnastish/chat/pkg/stats"
 )
 
-type ClientStatus int
-
-// const (
-// 	ClientStatus_Connected ClientStatus = iota
-// 	ClientStatus_Disconnected
-// 	ClientStatus_Pending // about to be connected
-// )
-
-type Client struct {
-	conn      net.Conn
-	name      string // remoteName
-	connected bool
-	rejoined  bool
-	// status    ClientStatus
-}
+// Use Redis as a cache for stroing messages
+// A map from a client name to a list of messages send during this session
+// By the end of the session, we should dump all the messages into a database
+var messageCache map[string][]*Message
 
 type Session struct {
-	clients             map[string]*Client
+	clients map[string]*Client
+	// mu                  sync.Mutex
 	timer               *time.Timer
 	duration            time.Duration
 	timeoutCh           chan struct{}
@@ -47,10 +41,11 @@ type Session struct {
 	cancelCtx           context.CancelFunc
 	quitCh              chan struct{}
 
-	stats sts.Stats
+	*SqlDB
 
-	// TODO: Replace with mysql
-	db map[string]bool
+	db map[string]bool // Replace with mysql
+
+	stats sts.Stats
 }
 
 var log = lgr.NewLogger("debug")
@@ -69,6 +64,14 @@ func NewSession(networkProtocol, address string) *Session {
 		return nil
 	}
 
+	// Put before initializing a listener?
+	db, err := newDb("mysql", "root:polechka2003@tcp(127.0.0.1)/test")
+	if err != nil {
+		log.Error().Msgf("failed to create a db: %s", err.Error())
+		listener.Close()
+		return nil
+	}
+
 	return &Session{
 		clients:             make(map[string]*Client),
 		duration:            timeout,
@@ -84,9 +87,9 @@ func NewSession(networkProtocol, address string) *Session {
 		cancelCtx:           cancelCtx,
 		quitCh:              make(chan struct{}),
 		timeoutCh:           make(chan struct{}),
-
+		SqlDB:               db,
 		// should be mysql db
-		db: make(map[string]bool),
+		// db: make(map[string]bool),
 	}
 }
 
@@ -151,53 +154,63 @@ func disconnectIdleClient(conn net.Conn, abortCh, quitCh chan struct{}) {
 	}
 }
 
-// func (s *Session) promptClientName(conn net.Conn) bool {
-// 	// read from connection
-// 	buf := make([]byte, 4096) // 256
-// 	for {
-// 		// We should only read from a connection in one place
-// 		bytesRead, err := conn.Read(buf)
-// 		if err != nil && err != io.EOF {
-// 			log.Error().Msgf("failed to read from a connection: %s", conn.RemoteAddr().String())
-// 			return false
-// 		}
+// Introduce a limit on how many attempts client has
+// Disconnect the client if it run out of attempts
+func (s *Session) readClientName(conn net.Conn, remoteAddr string) bool {
+	s.messagesCh <- &Message{
+		ownedBySession: true,
+		data:           []byte("client_name:"),
+		time:           time.Now(),
+		hasRecipient:   true,
+		recipient:      remoteAddr,
+	}
 
-// 		if bytesRead == 0 {
-// 			log.Error().Msg("zero bytes read")
-// 			return false
-// 		}
+	buf := make([]byte, 4096) // 256
+	for {
+		bytesRead, err := conn.Read(buf)
+		if err != nil && err != io.EOF {
+			log.Error().Msgf("failed to read from a connection: %s", conn.RemoteAddr().String())
+			return false
+		}
 
-// 		// Make a lookup at a database to see whether this name is already occupied.
-// 		clientName := string(buf[:bytesRead])
+		if bytesRead == 0 {
+			return false
+		}
 
-// 		_, exists := s.db[clientName]
-// 		if exists {
-// 			msg = []byte("already exist, try a different one")
-// 			s.messagesCh <- Message{
-// 				sender:    conn.LocalAddr().String(),
-// 				recipient: conn.RemoteAddr().String(),
-// 				data:      msg,
-// 				size:      len(msg),
-// 			}
-// 		} else {
-// 			// connection accepted
-// 			// change client's status
-// 			c := s.clients[conn.RemoteAddr().String()]
-// 			c.status = ClientStatus_Connected
-// 			c.clientName = clientName
+		expectedClientName := string(common.StripCR(buf, bytesRead))
 
-// 			break
-// 		}
-// 	}
-// }
+		if s.SqlDB.hasClient(expectedClientName) {
+			// send a message that a client already exists.
+			// Is it expensive to make a database query every time in a for loop?
+			// Maybe a better approach would be to cache all the clients on session's startup,
+			// maybe in a map, and then make a lookup in a map itself.
+		} else {
+			// append client to a database
+			s.SqlDB.insertClient(expectedClientName, remoteAddr, "connected", time.Now().Format(time.DateTime))
+		}
+
+		_, exists := s.db[expectedClientName]
+		if exists {
+			s.messagesCh <- &Message{
+				ownedBySession: true,
+				data:           []byte("name: [%s] already exists, try a different one"),
+				time:           time.Now(),
+				hasRecipient:   true,
+				recipient:      remoteAddr,
+			}
+		} else {
+			oldStatus := atomic.SwapInt32(&s.clients[remoteAddr].status, ClientStatus_Connected)
+			_ = oldStatus // supposed to be Pending
+
+			// persistant storage
+			// s.db[k] = true
+
+			return true
+		}
+	}
+}
 
 func (s *Session) handleConnection(conn net.Conn) {
-	// NOTE: Each client should have its own channel for pushing messages,
-	// so we don't overload the main s.messagesCh channel
-	// outgoing := make(chan Message)
-
-	// s.promptClientName(conn) // blocks
-
 	abortCh := make(chan struct{})
 	quitCh := make(chan struct{})
 
@@ -209,57 +222,53 @@ func (s *Session) handleConnection(conn net.Conn) {
 		conn:      conn,
 		name:      remoteAddr,
 		connected: true,
-		// status:    ClientStatus_Pending,
+		status:    ClientStatus_Pending,
 	}
 
-	// sessionAddr := conn.LocalAddr().String()
-	// s.messagesCh <- MakeMessage([]byte("client_name:"), senderName, connName)
-
-	// s.messagesCh <- MakeMessage([]byte("joined"), remoteAddr)
-
-	// Make sure it happens after we added a newly arrived participant to a map,
-	// because otherwise, the participant won't be found.
-	if s.nClients.Load() > 1 {
-		s.messagesCh <- &Message{
-			ownedBySession: true,
-			data:           []byte("Joined"),
-			time:           time.Now(),
-		}
-
-		s.listParticipants(conn)
-	}
-
-	buf := make([]byte, 4096)
-
-	// Use conn.SetDeadline() in order to disconnect idle clients.
-	for {
-		nBytes, err := conn.Read(buf)
-		if err != nil && err != io.EOF {
-			// Do determine whether it was an error or it's we who closed the connection.
-			// We would have to multiplex.
-			select {
-			case <-quitCh:
-				// Send a message to a client that it has been idle for long period of time,
-				// and thus was disconnected from the session.
-				log.Info().Msgf("[%15s]: Has been idle for too long, disconnecting", remoteAddr)
-			default:
-				log.Error().Msgf("failed to read bytes from the client: %s", err.Error())
+	if s.readClientName(conn, remoteAddr) {
+		if s.nClients.Load() > 1 {
+			// Notify the rest of the participants about who joined the session
+			s.messagesCh <- &Message{
+				ownedBySession: true,
+				data:           []byte("Joined"),
+				time:           time.Now(),
 			}
-			break
+
+			s.listParticipants(conn)
 		}
 
-		if nBytes == 0 {
-			break
+		buf := make([]byte, 4096)
+
+		// Use conn.SetDeadline() in order to disconnect idle clients.
+		for {
+			nBytes, err := conn.Read(buf)
+			if err != nil && err != io.EOF {
+				// Do determine whether it was an error or it's we who closed the connection.
+				// We would have to multiplex.
+				select {
+				case <-quitCh:
+					// Send a message to a client that it has been idle for long period of time,
+					// and thus was disconnected from the session.
+					log.Info().Msgf("[%15s]: Has been idle for too long, disconnecting", remoteAddr)
+				default:
+					log.Error().Msgf("failed to read bytes from the client: %s", err.Error())
+				}
+				break
+			}
+
+			if nBytes == 0 {
+				break
+			}
+
+			// Introduce a better name
+			abortCh <- struct{}{}
+
+			// Would it be possible to serialize the message, send it as bytes,
+			// and then deserialize it on the client side?
+			// so, the message would have a header and a body
+			// containing an actual contents.
+			s.messagesCh <- MakeMessage(buf[:nBytes], remoteAddr)
 		}
-
-		// Introduce a better name
-		abortCh <- struct{}{}
-
-		// Would it be possible to serialize the message, send it as bytes,
-		// and then deserialize it on the client side?
-		// so, the message would have a header and a body
-		// containing an actual contents.
-		s.messagesCh <- MakeMessage(buf[:nBytes], remoteAddr)
 	}
 
 	s.onSessionLeftCh <- remoteAddr
@@ -407,7 +416,6 @@ func (s *Session) listParticipants(conn net.Conn) {
 
 		sessionParticipants += fmt.Sprintf("\n\t[%-20s] *%s", client.name, status)
 	}
-
 	sender := conn.LocalAddr().String()
 	recipient := conn.RemoteAddr().String()
 

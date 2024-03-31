@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/isnastish/chat/pkg/common"
 	lgr "github.com/isnastish/chat/pkg/logger"
 	sts "github.com/isnastish/chat/pkg/stats"
 )
@@ -147,16 +148,6 @@ func (c *Client) send() {
 			break
 		}
 
-		// TODO: Use bytes.CutSuffix instead.
-		// strip \r\n || \n\r
-		for back := bytesRead - 1; back >= 0; back-- {
-			if buf[back] == '\n' || buf[back] == '\r' {
-				bytesRead--
-				continue
-			}
-			break
-		}
-
-		c.outgoingCh <- Message{data: buf[:bytesRead]}
+		c.outgoingCh <- Message{data: common.StripCR(buf, bytesRead)}
 	}
 }
