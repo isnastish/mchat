@@ -1,26 +1,29 @@
-package session
-
-// Regardless if client's remote address, they should be verified by its name.
-// And inserted/deleted from a db accordingly
-// TODO: Try out gorm package so we don't construct all the queries manually. (for learning purposes) github.com/go-gorm/gorm
+package mysql
 
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+
+	lgr "github.com/isnastish/chat/pkg/logger"
 )
 
-type SqlDB struct {
-	driver         string
-	dataSrouceName string // TODO: Figure out how to handle it more securily
-	tableName      string
-	tableExists    bool
+type MysqlBackend struct {
+	tableName string // we can have multiple tables, thus this field should be removed
 	*sql.DB
 }
 
-func newDb(driver, dataSourceName string) (*SqlDB, error) {
-	db, err := sql.Open(driver, dataSourceName)
+type MysqlSettings struct {
+	Driver         string
+	DataSrouceName string
+}
+
+var log = lgr.NewLogger("debug")
+
+func NewMysqlBackend(settings *MysqlSettings) (*MysqlBackend, error) {
+	db, err := sql.Open(settings.Driver, settings.DataSrouceName)
 	if err != nil {
 		return nil, err
 	}
@@ -60,17 +63,15 @@ func newDb(driver, dataSourceName string) (*SqlDB, error) {
 		return nil, err
 	}
 
-	res := &SqlDB{
-		driver:         driver,
-		dataSrouceName: dataSourceName,
-		tableName:      tableName,
-		DB:             db,
+	res := &MysqlBackend{
+		tableName: tableName,
+		DB:        db,
 	}
 
 	return res, nil
 }
 
-func (db *SqlDB) hasClient(name string) bool {
+func (mb *MysqlBackend) ContainsClient(identifier string) bool {
 	query := fmt.Sprintf(
 		"SELECT "+
 			"name"+
@@ -78,11 +79,11 @@ func (db *SqlDB) hasClient(name string) bool {
 			"WHERE ("+
 			"name = \"%s\""+
 			");",
-		db.tableName,
-		name,
+		mb.tableName,
+		identifier,
 	)
 
-	rows, err := db.DB.Query(query)
+	rows, err := mb.DB.Query(query)
 	if err != nil {
 		log.Error().Msgf("query [%s] failed with an error: %s", query, err.Error())
 		return false
@@ -98,7 +99,7 @@ func (db *SqlDB) hasClient(name string) bool {
 	return exists
 }
 
-func (db *SqlDB) insertClient(name string, ipAddress string, status string, connectionTime string) bool {
+func (mb *MysqlBackend) RegisterClient(identifier string, ipAddress string, status string, joinedTime time.Time) bool {
 	query := fmt.Sprintf(
 		"INSERT INTO %s ("+
 			"name,"+
@@ -112,14 +113,14 @@ func (db *SqlDB) insertClient(name string, ipAddress string, status string, conn
 			"\"%s\","+
 			"\"%s\""+
 			");",
-		db.tableName,
-		name,
+		mb.tableName,
+		identifier,
 		ipAddress,
 		status,
-		connectionTime,
+		joinedTime.Format(time.DateTime),
 	)
 
-	res, err := db.Exec(query)
+	res, err := mb.Exec(query)
 	if err != nil {
 		log.Error().Msgf("query [%s] failed with an error: %s", query, err.Error())
 		return false
@@ -131,18 +132,16 @@ func (db *SqlDB) insertClient(name string, ipAddress string, status string, conn
 	return true
 }
 
-type Participants [][3]string
-
-func (db *SqlDB) getAllParticipants() (Participants, error) {
+func (mb *MysqlBackend) GetParticipantsList() ([][3]string, error) {
 	// keep a query in a separate variable in case it grows
-	query := fmt.Sprintf("SELECT (name, ip_address, status) FROM %s", db.tableName)
-	rows, err := db.Query(query)
+	query := fmt.Sprintf("SELECT (name, ip_address, status) FROM %s", mb.tableName)
+	rows, err := mb.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query for a participants list: %s", err.Error())
 	}
 	defer rows.Close()
 
-	res := Participants{}
+	res := [][3]string{}
 	for rows.Next() {
 		col := [3]string{}
 		err = rows.Scan(col)
@@ -153,4 +152,8 @@ func (db *SqlDB) getAllParticipants() (Participants, error) {
 	}
 
 	return res, nil
+}
+
+func (mb *MysqlBackend) UpdateClient(identifier string, rest ...any) bool {
+	return true
 }

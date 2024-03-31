@@ -1,0 +1,31 @@
+TODO: 
+
+[ ] Include client's name when sending a message about newly arrived clients. (on Joined)
+    The message should include time, when a participant has joined, and it's provided name.
+    [12:00:00] @participantName Joined
+
+[ ] Query the database for a list of available participants.
+
+[x] Be able to switch between different storages, mysql vs redis. 
+    This requires implementing a support for Redis first.
+    Implement a backend which can switch between sql and in-memory storage.
+    Create a pkg/backend folder with implementations for both backends.
+    Use interface{} for the backend.
+
+[ ] Secure the connection with TLS.
+
+[ ] Connect to Redis with TLS (only for production, not for local development)
+
+[ ] Allow clients to host their own sessions. A new session should executed in a separate go routine
+    or even in a separate process. And we probably would have to maintain a map of sessions somewhere.
+    Go:
+    var sessionMap map[string]*Session
+    Once a session has been created, we have to add it to a sessions map.
+
+[ ] Enable tracing and metrics for redis backend implementation.
+
+[ ] Introduce a memory backend. (most likely in a form of a map[string]*map[string]string), 
+    So we can switch between different backends, Redis, Mysql and in memory backend.
+
+[x] Backend should be determined based on env variable DATABASE_BACKEND, 
+    and can be either "redis", "mysql" or "memory".

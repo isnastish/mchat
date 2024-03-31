@@ -98,8 +98,7 @@ Loop:
 			} else {
 				c.stats.MessagesDropped.Add(1)
 			}
-
-			log.Info().Msgf("sent message: %s", string(msg.data))
+			// log.Info().Msgf("sent message: %s", string(msg.data))
 
 		case <-c.quitCh:
 			break Loop

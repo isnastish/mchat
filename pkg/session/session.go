@@ -1,26 +1,22 @@
 package session
 
-// Give clients an ability to host their own sessions.
-
 import (
 	"context"
-	_ "database/sql"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/isnastish/chat/pkg/common"
+	bk "github.com/isnastish/chat/pkg/db_backend"
+	bk_mysql "github.com/isnastish/chat/pkg/db_backend/mysql"
+	bk_redis "github.com/isnastish/chat/pkg/db_backend/redis"
 	lgr "github.com/isnastish/chat/pkg/logger"
 	sts "github.com/isnastish/chat/pkg/stats"
 )
-
-// Use Redis as a cache for stroing messages
-// A map from a client name to a list of messages send during this session
-// By the end of the session, we should dump all the messages into a database
-var messageCache map[string][]*Message
 
 type Session struct {
 	clients map[string]*Client
@@ -32,20 +28,18 @@ type Session struct {
 	listener            net.Listener
 	network             string // tcp|udp
 	address             string
-	onSessionJoinedCh   chan *Client
-	onSessionLeftCh     chan string
+	onSessionJoinedCh   chan *Client // rename to onSessionJoinCh
+	onSessionLeftCh     chan string  // rename to onSessionLeave
 	onSessionRejoinedCh chan *Client
 	messagesCh          chan *Message
 	running             bool
 	ctx                 context.Context
 	cancelCtx           context.CancelFunc
 	quitCh              chan struct{}
+	db                  map[string]bool // Replace with mysql
 
-	*SqlDB
-
-	db map[string]bool // Replace with mysql
-
-	stats sts.Stats
+	stats     sts.Stats
+	dbBackend bk.DatabaseBackend
 }
 
 var log = lgr.NewLogger("debug")
@@ -53,8 +47,41 @@ var log = lgr.NewLogger("debug")
 func NewSession(networkProtocol, address string) *Session {
 	const timeout = 10000 * time.Millisecond
 
-	ctx, cancelCtx := context.WithCancel(context.Background())
+	backend, set := os.LookupEnv("DATABASE_BACKEND")
+	if !set {
+		backend = bk.BackendType_Redis
+	}
 
+	var dbBackend bk.DatabaseBackend
+	var err error
+
+	// This should be done when we create a session manager, NOT for each session.
+	// If a specified backend fails to initialize, should we terminate the programm, or try other backends?
+	switch backend {
+	case bk.BackendType_Redis:
+		settings := bk_redis.RedisSettings{}
+		dbBackend, err = bk_redis.NewRedisBackend(&settings)
+		if err != nil {
+			log.Error().Msgf("failed to initialize redis backend: %s", err.Error())
+			return nil
+		}
+	case bk.BackendType_Mysql:
+		settings := bk_mysql.MysqlSettings{
+			Driver:         "mysql",
+			DataSrouceName: "root:polechka2003@tcp(127.0.0.1)/test",
+		}
+		dbBackend, err = bk_mysql.NewMysqlBackend(&settings)
+		if err != nil {
+			log.Error().Msgf("failed to initialize mysql backend: %s", err.Error())
+			return nil
+		}
+	case bk.BackendType_Memory:
+		// not implemented
+	default:
+		log.Error().Msgf("backend [%s] is not supported", backend)
+	}
+
+	ctx, cancelCtx := context.WithCancel(context.Background())
 	lc := net.ListenConfig{}
 	listener, err := lc.Listen(ctx, networkProtocol, address)
 	if err != nil {
@@ -64,13 +91,23 @@ func NewSession(networkProtocol, address string) *Session {
 		return nil
 	}
 
-	// Put before initializing a listener?
-	db, err := newDb("mysql", "root:polechka2003@tcp(127.0.0.1)/test")
-	if err != nil {
-		log.Error().Msgf("failed to create a db: %s", err.Error())
-		listener.Close()
-		return nil
-	}
+	// // test map
+	// clientAHash := "@alexey"
+	// var clients = map[string]*map[string]string{
+	// 	clientAHash:      {"ip_address": "127.0.0.1:9873", "messagesSent": "12", "connectionTime": "22:00:03"},
+	// 	"@another_user":  {"ip_address": "127.0.0.1:7777", "messagesSent": "56"},
+	// 	"@one_more_user": {"ip_address": "127.0.0.1:9980", "messagesSent": "1230"},
+	// }
+	// redis.storeMap(clients)
+	// m, err := redis.getMap(clientAHash)
+	// if err != nil {
+	// 	log.Error().Msgf("failed to retrieve map: %s", err.Error())
+	// 	listener.Close()
+	// 	return nil
+	// }
+	// for k, v := range m {
+	// 	log.Info().Msgf("%s:%s", k, v)
+	// }
 
 	return &Session{
 		clients:             make(map[string]*Client),
@@ -87,9 +124,7 @@ func NewSession(networkProtocol, address string) *Session {
 		cancelCtx:           cancelCtx,
 		quitCh:              make(chan struct{}),
 		timeoutCh:           make(chan struct{}),
-		SqlDB:               db,
-		// should be mysql db
-		// db: make(map[string]bool),
+		dbBackend:           dbBackend,
 	}
 }
 
@@ -179,14 +214,14 @@ func (s *Session) readClientName(conn net.Conn, remoteAddr string) bool {
 
 		expectedClientName := string(common.StripCR(buf, bytesRead))
 
-		if s.SqlDB.hasClient(expectedClientName) {
+		if s.dbBackend.ContainsClient(expectedClientName) {
 			// send a message that a client already exists.
 			// Is it expensive to make a database query every time in a for loop?
 			// Maybe a better approach would be to cache all the clients on session's startup,
-			// maybe in a map, and then make a lookup in a map itself.
+			// maybe in a map, and then make a lookup in a map itself rather than making a query into the database.
 		} else {
 			// append client to a database
-			s.SqlDB.insertClient(expectedClientName, remoteAddr, "connected", time.Now().Format(time.DateTime))
+			s.dbBackend.RegisterClient(expectedClientName, remoteAddr, "connected", time.Now())
 		}
 
 		_, exists := s.db[expectedClientName]
