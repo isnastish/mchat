@@ -1,1 +1,1 @@
-# Multi-client chat in Golang.
+# Multi-client chat in Go.
