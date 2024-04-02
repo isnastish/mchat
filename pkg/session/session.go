@@ -59,7 +59,12 @@ func NewSession(networkProtocol, address string) *Session {
 	// If a specified backend fails to initialize, should we terminate the programm, or try other backends?
 	switch backend {
 	case bk.BackendType_Redis:
-		settings := bk_redis.RedisSettings{}
+		settings := bk_redis.RedisSettings{
+			Network:    "tcp",
+			Addr:       "127.0.0.1:6379",
+			Password:   "",
+			MaxRetries: 5,
+		}
 		dbBackend, err = bk_redis.NewRedisBackend(&settings)
 		if err != nil {
 			log.Error().Msgf("failed to initialize redis backend: %s", err.Error())

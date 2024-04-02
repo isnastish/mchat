@@ -29,3 +29,12 @@ TODO:
 
 [x] Backend should be determined based on env variable DATABASE_BACKEND, 
     and can be either "redis", "mysql" or "memory".
+
+[x] Create an instruction how to start redis-server on windows:
+    1. Enter wsl: 
+    2. curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
+    3. echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
+    4. sudo apt-get update
+    5. sudo apt-get install redis
+    6. sudo service redis-server start
+    7. redis-cli

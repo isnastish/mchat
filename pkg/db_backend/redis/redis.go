@@ -14,20 +14,20 @@ type RedisBackend struct {
 }
 
 type RedisSettings struct {
-	network    string
-	address    string
-	password   string
-	maxRetries int
+	Network    string
+	Addr       string
+	Password   string
+	MaxRetries int
 }
 
 var log = lgr.NewLogger("debug")
 
 func NewRedisBackend(settings *RedisSettings) (*RedisBackend, error) {
 	options := redis.Options{
-		Network:    settings.network,
-		Addr:       settings.address,
-		Password:   settings.password,
-		MaxRetries: settings.maxRetries,
+		Network:    settings.Network,
+		Addr:       settings.Addr,
+		Password:   settings.Password,
+		MaxRetries: settings.MaxRetries,
 		DB:         0,
 		OnConnect: func(ctx context.Context, cn *redis.Conn) error {
 			log.Info().Msg("Connection with redis server established")
@@ -75,6 +75,16 @@ func (rb *RedisBackend) ContainsClient(identifier string) bool {
 }
 
 func (rb *RedisBackend) RegisterClient(identifier string, ipAddress string, status string, joinedTime time.Time) bool {
+	var m = map[string]string{
+		"ip_address": ipAddress,
+		"status":     status,
+		"joinedTime": joinedTime.Format(time.DateTime),
+	}
+
+	if err := rb.client.HSet(rb.ctx, identifier, m).Err(); err != nil {
+		return false
+	}
+
 	return true
 }
 
