@@ -71,7 +71,7 @@ func NewMysqlBackend(settings *MysqlSettings) (*MysqlBackend, error) {
 	return res, nil
 }
 
-func (mb *MysqlBackend) ContainsClient(identifier string) bool {
+func (mb *MysqlBackend) HasClient(name string) bool {
 	query := fmt.Sprintf(
 		"SELECT "+
 			"name"+
@@ -80,7 +80,7 @@ func (mb *MysqlBackend) ContainsClient(identifier string) bool {
 			"name = \"%s\""+
 			");",
 		mb.tableName,
-		identifier,
+		name,
 	)
 
 	rows, err := mb.DB.Query(query)
@@ -99,7 +99,7 @@ func (mb *MysqlBackend) ContainsClient(identifier string) bool {
 	return exists
 }
 
-func (mb *MysqlBackend) RegisterClient(identifier string, ipAddress string, status string, joinedTime time.Time) bool {
+func (mb *MysqlBackend) RegisterClient(name string, ipAddress string, status string, joinedTime time.Time) error {
 	query := fmt.Sprintf(
 		"INSERT INTO %s ("+
 			"name,"+
@@ -114,46 +114,46 @@ func (mb *MysqlBackend) RegisterClient(identifier string, ipAddress string, stat
 			"\"%s\""+
 			");",
 		mb.tableName,
-		identifier,
+		name,
 		ipAddress,
 		status,
 		joinedTime.Format(time.DateTime),
 	)
 
-	res, err := mb.Exec(query)
-	if err != nil {
-		log.Error().Msgf("query [%s] failed with an error: %s", query, err.Error())
-		return false
+	if _, err := mb.Exec(query); err != nil {
+		return err
 	}
-
-	id, err := res.LastInsertId()
-	_ = id
-
-	return true
+	return nil
 }
 
-func (mb *MysqlBackend) GetParticipantsList() ([][3]string, error) {
+func (mb *MysqlBackend) GetClients() (map[string]*map[string]string, error) {
 	// keep a query in a separate variable in case it grows
-	query := fmt.Sprintf("SELECT (name, ip_address, status) FROM %s", mb.tableName)
+	query := fmt.Sprintf("SELECT * FROM %s", mb.tableName)
 	rows, err := mb.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query for a participants list: %s", err.Error())
 	}
 	defer rows.Close()
 
-	res := [][3]string{}
+	res := make(map[string]*map[string]string)
 	for rows.Next() {
 		col := [3]string{}
 		err = rows.Scan(col)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan the rows: %s", err.Error())
 		}
-		res = append(res, col)
+		// res = append(res, col)
 	}
-
 	return res, nil
 }
 
-func (mb *MysqlBackend) UpdateClient(identifier string, rest ...any) bool {
-	return true
+func (mb *MysqlBackend) AddMessage(clientName string, sentTime time.Time, body [1024]byte) /* return error as well */ {
+	query := fmt.Sprintf("SELECT * FROM %s WHERE (name = '%s')", mb.tableName, clientName)
+	rows, err := mb.Query(query)
+
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
 }

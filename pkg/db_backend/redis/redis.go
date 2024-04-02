@@ -69,29 +69,29 @@ func NewRedisBackend(settings *RedisSettings) (*RedisBackend, error) {
 // 	return res.Val(), nil
 // }
 
-func (rb *RedisBackend) ContainsClient(identifier string) bool {
-	val := rb.client.HGetAll(rb.ctx, identifier).Val()
+func (rb *RedisBackend) HasClient(name string) bool {
+	val := rb.client.HGetAll(rb.ctx, name).Val()
 	return len(val) != 0
 }
 
-func (rb *RedisBackend) RegisterClient(identifier string, ipAddress string, status string, joinedTime time.Time) bool {
+func (rb *RedisBackend) RegisterClient(name string, ipAddress string, status string, joinedTime time.Time) error {
 	var m = map[string]string{
 		"ip_address": ipAddress,
 		"status":     status,
 		"joinedTime": joinedTime.Format(time.DateTime),
 	}
 
-	if err := rb.client.HSet(rb.ctx, identifier, m).Err(); err != nil {
-		return false
+	if err := rb.client.HSet(rb.ctx, name, m).Err(); err != nil {
+		return err
 	}
 
-	return true
+	return nil
 }
 
-func (rb *RedisBackend) UpdateClient(identifier string, rest ...any) bool {
-	return true
+func (rb *RedisBackend) AddMessage(clientName string, sentTime time.Time, body [1024]byte) {
+
 }
 
-func (rb *RedisBackend) GetParticipantsList() ([][3]string, error) {
+func (rb *RedisBackend) GetClients() (map[string]*map[string]string, error) {
 	return nil, nil
 }

@@ -1,5 +1,8 @@
 package session
 
+// Use the, when the client rejoins the session,
+// we should dump all the messages to a console, so that the data is persistent.
+
 type SessionManager struct {
 	sessions map[string]*Session
 }

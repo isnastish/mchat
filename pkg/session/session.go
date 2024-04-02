@@ -12,6 +12,7 @@ import (
 
 	"github.com/isnastish/chat/pkg/common"
 	bk "github.com/isnastish/chat/pkg/db_backend"
+	bk_memory "github.com/isnastish/chat/pkg/db_backend/memory"
 	bk_mysql "github.com/isnastish/chat/pkg/db_backend/mysql"
 	bk_redis "github.com/isnastish/chat/pkg/db_backend/redis"
 	lgr "github.com/isnastish/chat/pkg/logger"
@@ -55,8 +56,6 @@ func NewSession(networkProtocol, address string) *Session {
 	var dbBackend bk.DatabaseBackend
 	var err error
 
-	// This should be done when we create a session manager, NOT for each session.
-	// If a specified backend fails to initialize, should we terminate the programm, or try other backends?
 	switch backend {
 	case bk.BackendType_Redis:
 		settings := bk_redis.RedisSettings{
@@ -81,7 +80,7 @@ func NewSession(networkProtocol, address string) *Session {
 			return nil
 		}
 	case bk.BackendType_Memory:
-		// not implemented
+		dbBackend = bk_memory.NewMemoryBackend()
 	default:
 		log.Error().Msgf("backend [%s] is not supported", backend)
 	}
@@ -95,24 +94,6 @@ func NewSession(networkProtocol, address string) *Session {
 		_ = cancelCtx
 		return nil
 	}
-
-	// // test map
-	// clientAHash := "@alexey"
-	// var clients = map[string]*map[string]string{
-	// 	clientAHash:      {"ip_address": "127.0.0.1:9873", "messagesSent": "12", "connectionTime": "22:00:03"},
-	// 	"@another_user":  {"ip_address": "127.0.0.1:7777", "messagesSent": "56"},
-	// 	"@one_more_user": {"ip_address": "127.0.0.1:9980", "messagesSent": "1230"},
-	// }
-	// redis.storeMap(clients)
-	// m, err := redis.getMap(clientAHash)
-	// if err != nil {
-	// 	log.Error().Msgf("failed to retrieve map: %s", err.Error())
-	// 	listener.Close()
-	// 	return nil
-	// }
-	// for k, v := range m {
-	// 	log.Info().Msgf("%s:%s", k, v)
-	// }
 
 	return &Session{
 		clients:             make(map[string]*Client),
@@ -219,7 +200,7 @@ func (s *Session) readClientName(conn net.Conn, remoteAddr string) bool {
 
 		expectedClientName := string(common.StripCR(buf, bytesRead))
 
-		if s.dbBackend.ContainsClient(expectedClientName) {
+		if s.dbBackend.HasClient(expectedClientName) {
 			// send a message that a client already exists.
 			// Is it expensive to make a database query every time in a for loop?
 			// Maybe a better approach would be to cache all the clients on session's startup,

@@ -38,3 +38,13 @@ TODO:
     5. sudo apt-get install redis
     6. sudo service redis-server start
     7. redis-cli
+
+[ ] Authenticate all clients joining the session.
+
+[ ] All the data from sessions should be dumped into a database (either mysql or redis) at the end.
+[ ] Output the list of sessions (channels).
+    Sessions: 
+    [*] <name> [number of participants], [creation_data], [host - a client who hosted a session]
+
+    Ex:
+    [*] @my_session participants: [32], created: [23-02-2024, 11:03:00], host: @some_user_who_hosted_the_session
