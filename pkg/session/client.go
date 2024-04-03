@@ -16,6 +16,6 @@ type Client struct {
 	name      string // rename to remoteAddr or just addr
 	connected bool
 	rejoined  bool
-	status    int32  // atomic
-	connTime  t.Time // unused for now
+	status    int32 // atomic
+	joinTime  t.Time
 }

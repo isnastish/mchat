@@ -5,18 +5,18 @@ import (
 	t "time"
 )
 
-// Introduce a notion for distinguishing between us sending a message,
-// and an actual message that was sent from the client.
 type Message struct {
+	// not used yet.
+	Sender   string
+	Receiver string
+	SendTime t.Time
+
 	sender         string
 	ownedBySession bool
-
-	recipient    string
-	hasRecipient bool
-
-	data []byte
-
-	time t.Time
+	recipient      string
+	hasRecipient   bool
+	data           []byte
+	time           t.Time
 }
 
 func MakeMessage(data []byte, sender string, rest ...string) *Message {

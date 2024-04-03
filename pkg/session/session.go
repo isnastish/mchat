@@ -1,5 +1,8 @@
 package session
 
+// A session itself should hold all the messages send by different clients, not the client itself,
+// because the question arises what kind of messages each client has to store? Only the ones that he sent?
+
 import (
 	"context"
 	"fmt"
@@ -24,9 +27,14 @@ type SessionSettings struct {
 	BackendType     int
 }
 
+// NOTE: A session should own all the messages that were sent by all the participants,
+// until it was shut down.
+// All the messages should be dumped into a database (mysql | redis) or (in-memory for local development)
+// at the end of session.
+
 type Session struct {
-	clients map[string]*Client
-	// mu                  sync.Mutex
+	name                string
+	clients             map[string]*Client
 	timer               *time.Timer
 	duration            time.Duration
 	timeoutCh           chan struct{}
@@ -43,9 +51,15 @@ type Session struct {
 	cancelCtx           context.CancelFunc
 	quitCh              chan struct{}
 	db                  map[string]bool // Replace with mysql
+	stats               sts.Stats
+	dbBackend           bk.DatabaseBackend
 
-	stats     sts.Stats
-	dbBackend bk.DatabaseBackend
+	// We shouldn't store greeting messages, which were sent by a session itself.
+	// Like the information who joined the session or requesting client's info.
+	// Only messages, sent by actual participants, should be appended into a chatHistory.
+	// But then the storage has to be restructured.
+	chatHistory          []Message // use queue instead?
+	maxParticipantsCount int       // 1024
 }
 
 var log = lgr.NewLogger("debug")

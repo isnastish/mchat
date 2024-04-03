@@ -1,4 +1,4 @@
-// NOTE: Memory backend should only be used for local development (ONLY),
+// NOTE: Memory backend should only be used for local development.
 // so we don't rely on any data storage.
 // That implies that all the sessione's history will be erased by the end of programm execution,
 // or an alternative would be to upload it to a file.

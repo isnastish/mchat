@@ -22,7 +22,17 @@ func BackendTypeStr(backendType int) string {
 	}
 }
 
+// Rather than operating on clients, we should operate on sessions itself.
+// clients cannot communicate without creating a session.
 type DatabaseBackend interface {
+	// Either pass the whole session to a function, or bit by bit.
+	// Worth noting that passing the whole session might cause import cycle.
+
+	// AddNewSession(name string, participants map[string]*Client, chatHistory []Message) // should we pass a session name?
+	// UpdateSession()
+	// DoesSessionExist()
+	// GetSessionHistory()
+
 	HasClient(clientName string) bool
 	RegisterClient(clientName string, ipAddress string, status string, joinedTime time.Time) error
 	AddMessage(clientName string, sentTime time.Time, body [1024]byte)

@@ -4,6 +4,7 @@ package session
 // we should dump all the messages to a console, so that the data is persistent.
 
 type SessionManager struct {
+	// Session manager should hold a storage for all created sessions.
 	sessions map[string]*Session
 }
 
