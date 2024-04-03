@@ -3,22 +3,26 @@ package main
 import (
 	"flag"
 	"os"
+	"strconv"
 
+	"github.com/isnastish/chat/pkg/db_backend"
 	"github.com/isnastish/chat/pkg/session"
 )
 
 func main() {
-	var networkProtocol string
-	var address string
+	settings := session.SessionSettings{}
 
-	flag.StringVar(&networkProtocol, "network", "tcp", "network protocol (tcp|udp)")
-	flag.StringVar(&address, "address", ":5000", "address to listen in. E.g. localhost:8080")
+	flag.StringVar(&settings.NetworkProtocol, "network", "tcp", "network protocol (tcp|udp)")
+	flag.StringVar(&settings.Addr, "address", ":5000", "address to listen in")
 
 	flag.Parse()
 
-	// Specify as a command line argument?
-	os.Setenv("DATABASE_BACKEND", "redis")
+	if dbBackend, exists := os.LookupEnv("DATABASE_BACKEND"); exists {
+		settings.BackendType, _ = strconv.Atoi(dbBackend)
+	} else {
+		settings.BackendType = dbbackend.BackendType_Memory
+	}
 
-	s := session.NewSession(networkProtocol, address)
+	s := session.NewSession(&settings)
 	s.AcceptConnections()
 }

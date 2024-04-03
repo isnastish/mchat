@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -18,6 +17,12 @@ import (
 	lgr "github.com/isnastish/chat/pkg/logger"
 	sts "github.com/isnastish/chat/pkg/stats"
 )
+
+type SessionSettings struct {
+	NetworkProtocol string // tcp|udp
+	Addr            string
+	BackendType     int
+}
 
 type Session struct {
 	clients map[string]*Client
@@ -45,49 +50,53 @@ type Session struct {
 
 var log = lgr.NewLogger("debug")
 
-func NewSession(networkProtocol, address string) *Session {
+func NewSession(settings *SessionSettings) *Session {
 	const timeout = 10000 * time.Millisecond
-
-	backend, set := os.LookupEnv("DATABASE_BACKEND")
-	if !set {
-		backend = bk.BackendType_Redis
-	}
 
 	var dbBackend bk.DatabaseBackend
 	var err error
 
-	switch backend {
+	switch settings.BackendType {
 	case bk.BackendType_Redis:
-		settings := bk_redis.RedisSettings{
+		dbBackend, err = bk_redis.NewRedisBackend(&bk_redis.RedisSettings{
 			Network:    "tcp",
 			Addr:       "127.0.0.1:6379",
 			Password:   "",
 			MaxRetries: 5,
-		}
-		dbBackend, err = bk_redis.NewRedisBackend(&settings)
+		})
+
 		if err != nil {
 			log.Error().Msgf("failed to initialize redis backend: %s", err.Error())
 			return nil
 		}
+
+		log.Info().Msgf("using backend: %s", bk.BackendTypeStr(settings.BackendType))
+
 	case bk.BackendType_Mysql:
-		settings := bk_mysql.MysqlSettings{
+		dbBackend, err = bk_mysql.NewMysqlBackend(&bk_mysql.MysqlSettings{
 			Driver:         "mysql",
 			DataSrouceName: "root:polechka2003@tcp(127.0.0.1)/test",
-		}
-		dbBackend, err = bk_mysql.NewMysqlBackend(&settings)
+		})
+
 		if err != nil {
 			log.Error().Msgf("failed to initialize mysql backend: %s", err.Error())
 			return nil
 		}
-	case bk.BackendType_Memory:
+
+		log.Info().Msgf("using backend: %s", bk.BackendTypeStr(settings.BackendType))
+
+	case bk.BackendType_Memory: // never fails
 		dbBackend = bk_memory.NewMemoryBackend()
+		log.Info().Msgf("using backend: %s", bk.BackendTypeStr(settings.BackendType))
+
 	default:
-		log.Error().Msgf("backend [%s] is not supported", backend)
+		log.Warn().Msgf("[%s] is not supported", bk.BackendTypeStr(settings.BackendType))
+		dbBackend = bk_memory.NewMemoryBackend()
 	}
 
 	ctx, cancelCtx := context.WithCancel(context.Background())
 	lc := net.ListenConfig{}
-	listener, err := lc.Listen(ctx, networkProtocol, address)
+	listener, err := lc.Listen(ctx, settings.NetworkProtocol, settings.Addr)
 	if err != nil {
 		log.Error().Msgf("failed to created a listener: %v", err.Error())
 		listener.Close()
@@ -95,13 +104,14 @@ func NewSession(networkProtocol, address string) *Session {
 		return nil
 	}
 
+	// TODO: Make SessionSettings a part of Session struct?
 	return &Session{
 		clients:             make(map[string]*Client),
 		duration:            timeout,
 		timer:               time.NewTimer(timeout),
 		listener:            listener,
-		network:             networkProtocol,
-		address:             address,
+		network:             settings.NetworkProtocol,
+		address:             settings.Addr,
 		onSessionJoinedCh:   make(chan *Client),
 		onSessionLeftCh:     make(chan string),
 		onSessionRejoinedCh: make(chan *Client),
