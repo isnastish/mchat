@@ -20,6 +20,5 @@ func main() {
 		fmt.Printf("failed to create a client: %s\n", err.Error())
 		return
 	}
-
 	c.Run()
 }

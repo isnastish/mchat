@@ -48,3 +48,20 @@ TODO:
 
     Ex:
     [*] @my_session participants: [32], created: [23-02-2024, 11:03:00], host: @some_user_who_hosted_the_session
+
+[ ] Replace build.bat with build.py file, so we can run on all platforms.
+
+[ ] We shouldn't use logs while displaying the messages received by the clients.
+    Logs should only be available on the server side.
+
+[ ] Rename client's.addr field to name, when the functionality for processing client's names is implemented.
+
+[ ] Rename `common` package to `utilities`.
+
+[ ] Encode the data on the sender side using base64 encoding, and decode the data on the receiver side.
+
+[ ] Right now we have three types of messages, which develops into maintaining three types of channels.
+    Since we now know all the edge cases and difference between message types, pull everything into a single 
+    struct for clarity. Maybe introduce an enum with corresponding messages types.
+
+[ ] Adjust metrics according global refactoring.

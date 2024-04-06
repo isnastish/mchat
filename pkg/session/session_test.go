@@ -1,17 +1,16 @@
 package session
 
 import (
+	bk "github.com/isnastish/chat/pkg/backend"
 	"github.com/stretchr/testify/assert"
 	"net"
 	"testing"
-
-	"github.com/isnastish/chat/pkg/db_backend"
 )
 
-var settings = SessionSettings{
+var settings = Settings{
 	NetworkProtocol: "tcp",
 	Addr:            ":5000",
-	BackendType:     dbbackend.BackendType_Memory,
+	BackendType:     bk.BackendType_Memory,
 }
 
 func TestConnectionEstablished(t *testing.T) {

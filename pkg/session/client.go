@@ -2,7 +2,7 @@ package session
 
 import (
 	"net"
-	t "time"
+	"time"
 )
 
 const (
@@ -12,10 +12,13 @@ const (
 )
 
 type Client struct {
-	conn      net.Conn
-	name      string // rename to remoteAddr or just addr
-	connected bool
-	rejoined  bool
-	status    int32 // atomic
-	joinTime  t.Time
+	conn     net.Conn
+	ipAddr   string
+	name     string
+	status   int32
+	joinTime time.Time
+}
+
+func (c *Client) matchStatus(status int32) bool {
+	return c.status == status
 }

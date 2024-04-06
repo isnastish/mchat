@@ -5,12 +5,12 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/isnastish/chat/pkg/db_backend"
+	bk "github.com/isnastish/chat/pkg/backend"
 	"github.com/isnastish/chat/pkg/session"
 )
 
 func main() {
-	settings := session.SessionSettings{}
+	settings := session.Settings{}
 
 	flag.StringVar(&settings.NetworkProtocol, "network", "tcp", "network protocol (tcp|udp)")
 	flag.StringVar(&settings.Addr, "address", ":5000", "address to listen in")
@@ -20,7 +20,7 @@ func main() {
 	if dbBackend, exists := os.LookupEnv("DATABASE_BACKEND"); exists {
 		settings.BackendType, _ = strconv.Atoi(dbBackend)
 	} else {
-		settings.BackendType = dbbackend.BackendType_Memory
+		settings.BackendType = bk.BackendType_Memory
 	}
 
 	s := session.NewSession(&settings)

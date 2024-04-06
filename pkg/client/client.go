@@ -2,10 +2,11 @@ package client
 
 import (
 	"bufio"
-	_ "bytes"
+	"fmt"
 	"io"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/isnastish/chat/pkg/common"
@@ -79,7 +80,17 @@ Loop:
 		select {
 		case msg := <-c.incommingCh:
 			c.stats.MessagesReceived.Add(1)
-			log.Info().Msgf("received message: %s", string(msg.data))
+			msgStr := string(msg.data)
+			// Introduce a table of reserved commands. All commans should be prefixed with @ to distinguish between regular messages.
+			// @name:
+			// @new_channel: (for example)
+			// @list_participants ...
+			if strings.Contains(msgStr, "@name:") {
+				fmt.Printf("%s", msgStr)
+			} else {
+				fmt.Printf("%s\n", msgStr)
+			}
+			// log.Info().Msgf("received message: %s", string(msg.data))
 
 		case msg := <-c.outgoingCh:
 			messageSize := len(msg.data)
