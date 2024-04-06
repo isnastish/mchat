@@ -1,11 +1,14 @@
 package main
 
+// NOTE: This should be a server package, and we shouldn't create a session here.
+// A session should only be created by clients.
+
 import (
 	"flag"
 	"os"
 	"strconv"
 
-	"github.com/isnastish/chat/pkg/db_backend"
+	"github.com/isnastish/chat/pkg/backend"
 	"github.com/isnastish/chat/pkg/session"
 )
 
@@ -20,7 +23,7 @@ func main() {
 	if dbBackend, exists := os.LookupEnv("DATABASE_BACKEND"); exists {
 		settings.BackendType, _ = strconv.Atoi(dbBackend)
 	} else {
-		settings.BackendType = dbbackend.BackendType_Memory
+		settings.BackendType = backend.BackendType_Memory
 	}
 
 	s := session.NewSession(&settings)

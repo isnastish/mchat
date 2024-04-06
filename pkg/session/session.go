@@ -1,7 +1,14 @@
 package session
 
+// NOTE: Put both, Redis and Mysql backends into separate services.
+// So we have to talk to a service which runs redis, for example.
 // A session itself should hold all the messages send by different clients, not the client itself,
 // because the question arises what kind of messages each client has to store? Only the ones that he sent?
+
+// IMPORTANT: A session shouldn't access a database in any way, session manager should be responsible for that.
+// A session should sent a signal to a session manager that all the clients left, and that's where we would have to
+// dump all the data into a database.
+// But initialy client all clients join the server, not a particular session.
 
 import (
 	"context"
@@ -12,11 +19,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	// bk "github.com/isnastish/chat/pkg/backend"
+	// bk_memory "github.com/isnastish/chat/pkg/backend/memory"
+	// bk_mysql "github.com/isnastish/chat/pkg/backend/mysql"
+	// bk_redis "github.com/isnastish/chat/pkg/backend/redis"
 	"github.com/isnastish/chat/pkg/common"
-	bk "github.com/isnastish/chat/pkg/db_backend"
-	bk_memory "github.com/isnastish/chat/pkg/db_backend/memory"
-	bk_mysql "github.com/isnastish/chat/pkg/db_backend/mysql"
-	bk_redis "github.com/isnastish/chat/pkg/db_backend/redis"
 	lgr "github.com/isnastish/chat/pkg/logger"
 	sts "github.com/isnastish/chat/pkg/stats"
 )
@@ -32,6 +39,10 @@ type SessionSettings struct {
 // All the messages should be dumped into a database (mysql | redis) or (in-memory for local development)
 // at the end of session.
 
+// NOTE: A session is equivalent to a channel.
+// A session should hold its state until all clients dissconnect, then we would have to shut-down a session
+// and put it into a storage, but that is a responsibility of a session manager.
+
 type Session struct {
 	name                string
 	clients             map[string]*Client
@@ -42,8 +53,9 @@ type Session struct {
 	listener            net.Listener
 	network             string // tcp|udp
 	address             string
+	port                int
 	onSessionJoinedCh   chan *Client // rename to onSessionJoinCh
-	onSessionLeftCh     chan string  // rename to onSessionLeave
+	onSessionLeftCh     chan string  // rename to onSessionLeaveCh
 	onSessionRejoinedCh chan *Client
 	messagesCh          chan *Message
 	running             bool
@@ -52,22 +64,28 @@ type Session struct {
 	quitCh              chan struct{}
 	db                  map[string]bool // Replace with mysql
 	stats               sts.Stats
-	dbBackend           bk.DatabaseBackend
+	// dbBackend           bk.SessionStorageBackend
 
 	// We shouldn't store greeting messages, which were sent by a session itself.
 	// Like the information who joined the session or requesting client's info.
 	// Only messages, sent by actual participants, should be appended into a chatHistory.
 	// But then the storage has to be restructured.
-	chatHistory          []Message // use queue instead?
+	// Maybe we should introduce another channel for those types of messages,
+	// and a separate channel for client messages.
+	MessageHistory       []Message // should be accessed from a backend
 	maxParticipantsCount int       // 1024
+
+	// Client who created a session (gave name to session)
+	host Client
 }
 
 var log = lgr.NewLogger("debug")
+var maxSessionParticipantsCount = 64
 
 func NewSession(settings *SessionSettings) *Session {
 	const timeout = 10000 * time.Millisecond
 
-	var dbBackend bk.DatabaseBackend
+	var dbBackend bk.SessionStorageBackend
 	var err error
 
 	switch settings.BackendType {
@@ -134,7 +152,9 @@ func NewSession(settings *SessionSettings) *Session {
 		cancelCtx:           cancelCtx,
 		quitCh:              make(chan struct{}),
 		timeoutCh:           make(chan struct{}),
-		dbBackend:           dbBackend,
+		// dbBackend:            dbBackend,
+		MessageHistory:       []Message{},
+		maxParticipantsCount: maxSessionParticipantsCount,
 	}
 }
 

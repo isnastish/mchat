@@ -10,8 +10,10 @@ func main() {
 	var network string
 	var address string
 
+	// 127.0.0.1:8200
+
 	flag.StringVar(&network, "network", "tcp", "Network protocol [TCP|UDP]")
-	flag.StringVar(&address, "address", "127.0.0.1:5000", "Address, for example: localhost:8080")
+	flag.StringVar(&address, "address", "127.0.0.1:8200", "Address, for example: localhost:8080")
 
 	flag.Parse()
 

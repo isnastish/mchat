@@ -6,10 +6,13 @@ import (
 )
 
 type Message struct {
-	// not used yet.
 	Sender   string
-	Receiver string
-	SendTime t.Time
+	Contents []byte
+	SendTime string
+	// This fields are mutully exclusive,
+	// we cannot specify a Receiver and SendToAllParticipants, and vice-versa.
+	Receiver              string
+	SendToAllParticipants bool
 
 	sender         string
 	ownedBySession bool
