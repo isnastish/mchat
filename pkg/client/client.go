@@ -124,18 +124,16 @@ func (c *Client) recv() {
 	buf := make([]byte, 4096)
 
 	for {
-		// If the client has been disconnected manually, we have to shutdown it completely
 		nbytes, err := c.remoteConn.Read(buf)
 		if err != nil && err != io.EOF {
 			log.Error().Msgf("failed to read from the remote connnection: %s", err.Error())
-			// should we shutdown this client or handle it more gracefully?
-			// Since send() function is still running, we cannot cancel recv function.
+			c.remoteConn.Close()
+			close(c.quitCh)
 			break
 		}
 
 		if nbytes == 0 {
 			log.Info().Msg("remote session closed the connection")
-			// force the send() goroutine to complete
 			close(c.quitCh)
 			return
 		}

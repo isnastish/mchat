@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	t "time"
 )
 
@@ -13,7 +14,7 @@ type ClientMessage struct {
 	contents     []byte
 }
 
-func newClientMsg(senderIpAddr string, senderName string, contents []byte) *ClientMessage {
+func NewClientMsg(senderIpAddr string, senderName string, contents []byte) *ClientMessage {
 	return &ClientMessage{
 		senderIpAddr: senderIpAddr,
 		senderName:   senderName,
@@ -22,30 +23,60 @@ func newClientMsg(senderIpAddr string, senderName string, contents []byte) *Clie
 	}
 }
 
-type SessionMessage struct {
-	receiver string
-	sendTime t.Time // string?
-	contents []byte
+func (m *ClientMessage) format() string {
+	return fmt.Sprintf("%s [%s]: %s",
+		m.sendTime.Format(t.DateTime),
+		m.senderName,
+		string(m.contents),
+	)
 }
 
-func newSessionMsg(receiver string, contents []byte) *SessionMessage {
-	return &SessionMessage{
-		receiver: receiver,
-		contents: contents,
-		sendTime: t.Now(),
+type SessionMessage struct {
+	receiver   string
+	sendTime   t.Time
+	contents   []byte
+	ignoreTime bool
+}
+
+func NewSessionMsg(receiver string, contents []byte, ignoreTime ...bool) *SessionMessage {
+	var ignore bool
+	if len(ignoreTime) > 0 {
+		ignore = ignoreTime[0]
 	}
+
+	return &SessionMessage{
+		receiver:   receiver,
+		contents:   contents,
+		sendTime:   t.Now(),
+		ignoreTime: ignore,
+	}
+}
+
+func (m *SessionMessage) format() []byte {
+	if m.ignoreTime {
+		return m.contents
+	}
+	return []byte(fmt.Sprintf("[%s] %s", m.sendTime.Format(t.DateTime), string(m.contents)))
 }
 
 type GreetingMessage struct {
 	sendTime t.Time
 	contents []byte
 	exclude  string
+	// ignoreTime bool
 }
 
-func newGreetingMsg(contents []byte, exclude string) *GreetingMessage {
+func NewGreetingMsg(contents []byte, exclude string) *GreetingMessage {
 	return &GreetingMessage{
 		sendTime: t.Now(),
 		contents: contents,
 		exclude:  exclude,
 	}
 }
+
+// func (m *GreetingMessage) format() []byte {
+// 	if m.ignoreTime {
+// 		return m.contents
+// 	}
+// 	return []byte(fmt.Sprintf("[%s] %s", m.sendTime.Format(t.DateTime), string(m.contents)))
+// }

@@ -12,17 +12,37 @@ import (
 	"sync/atomic"
 	"time"
 
-	bk "github.com/isnastish/chat/pkg/backend"
-	bk_memory "github.com/isnastish/chat/pkg/backend/memory"
-	bk_mysql "github.com/isnastish/chat/pkg/backend/mysql"
-	bk_redis "github.com/isnastish/chat/pkg/backend/redis"
 	"github.com/isnastish/chat/pkg/common"
 	lgr "github.com/isnastish/chat/pkg/logger"
+	bk "github.com/isnastish/chat/pkg/session/backend"
+	bk_memory "github.com/isnastish/chat/pkg/session/backend/memory"
+	bk_mysql "github.com/isnastish/chat/pkg/session/backend/mysql"
+	bk_redis "github.com/isnastish/chat/pkg/session/backend/redis"
 	sts "github.com/isnastish/chat/pkg/stats"
 )
 
-// Most likely we won't need to pull settings into a struct,
-// if we end up having only three member fields.
+// main states
+const (
+	ConnReader_ProcessingMenu_State = iota + 1
+	ConnReader_RegisteringNewClient_State
+	ConnReader_AuthenticatingClient_State
+	ConnReader_ProcessingClientMessages_State
+	ConnReader_CreatingChannel_State // not supported yet
+)
+
+// substates
+const (
+	None_SubState = iota
+	ConnReader_ReadingClientsName_SubState
+	ConnReader_ReadingClientsPassword_SubState
+)
+
+type ConnReader struct {
+	conn     net.Conn
+	state    int
+	substate int
+}
+
 type Settings struct {
 	NetworkProtocol string // tcp|udp
 	Addr            string
@@ -30,80 +50,107 @@ type Settings struct {
 }
 
 type ChatHistory struct {
-	_messages []ClientMessage
-	_count    int32
-	_mu       sync.Mutex
+	messages []ClientMessage
+	count    int32
+	cap      int32
+	mu       sync.Mutex
 }
 
-func (h *ChatHistory) push(msg *ClientMessage) {
-	h._mu.Lock()
-	h._messages = append(h._messages, *msg)
-	h._count++
-	h._mu.Unlock()
+var CLIENT_NAME_MAX_LEN = 64
+var CLIENT_PASSWORD_MAX_LEN = 256
+var DEBUG_ENABLED = true
+var log = lgr.NewLogger("debug")
+var menu = []string{
+	"[1] - Register",
+	"[2] - Log in",
+	"[3] - Exit",
+	"[4] - CreateChannel (not implemented)", // this should be available after we've logged in
+	"[5] - List channels (not implemented)",
 }
 
-func (h *ChatHistory) size() int32 {
-	h._mu.Lock()
-	defer h._mu.Unlock()
-	return h._count
+func (h *ChatHistory) Push(msg *ClientMessage) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.count >= h.cap {
+		new_cap := max(h.cap+1, h.cap<<2)
+		new_messages := make([]ClientMessage, new_cap)
+		copy(new_messages, h.messages)
+		h.messages = new_messages
+		h.cap = new_cap
+	}
+	h.messages[h.count] = *msg
+	h.count++
 }
 
-func (h *ChatHistory) flush(out []ClientMessage) int32 {
-	h._mu.Lock()
-	n := copy(out, h._messages)
-	h._mu.Unlock()
-	return int32(n)
+func (h *ChatHistory) Size() int32 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.count
+}
+
+func (h *ChatHistory) Flush(out []ClientMessage) int32 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return int32(copy(out, h.messages))
 }
 
 type ClientMap struct {
-	_clientsList []*Client // used for getClients()
-	_count       int32
-	_clientsMap  map[string]*Client
-	_mu          sync.Mutex
+	clientsList []*Client
+	count       int32
+	clientsMap  map[string]*Client
+	mu          sync.Mutex
 }
 
 func NewClientMap() *ClientMap {
 	return &ClientMap{
-		_clientsMap: make(map[string]*Client),
+		clientsMap: make(map[string]*Client),
 	}
 }
 
-func (m *ClientMap) add(addr string, c *Client) {
-	m._mu.Lock()
-	m._clientsMap[addr] = c
-	m._clientsList = append(m._clientsList, c)
-	m._count++
-	m._mu.Unlock()
+func (m *ClientMap) Push(addr string, c *Client) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.clientsMap[addr] = c
+	m.clientsList = append(m.clientsList, c)
+	m.count++
 }
 
-func (m *ClientMap) updateStatus(addr string, status int32) {
-	m._mu.Lock()
-	m._clientsMap[addr].status = status
-	m._mu.Unlock()
+// addr has to be a name
+func (m *ClientMap) UpdateStatus(addr string, status int32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.clientsMap[addr].status = status
 }
 
-func (m *ClientMap) assignName(addr string, name string) {
-	m._mu.Lock()
-	m._clientsMap[addr].name = name
-	m._mu.Unlock()
+// TODO(alx): Rename to SetName
+func (m *ClientMap) AssignName(addr string, name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.clientsMap[addr].name = name
 }
 
-func (m *ClientMap) size() int32 {
-	m._mu.Lock()
-	defer m._mu.Unlock()
-	return m._count
+func (m *ClientMap) SetPassword(addr string, password string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.clientsMap[addr].password = password
 }
 
-func (m *ClientMap) getClients(out []*Client) {
-	m._mu.Lock()
-	copy(out, m._clientsList)
-	m._mu.Unlock()
+func (m *ClientMap) Size() int32 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.count
 }
 
-func (m *ClientMap) tryGet(addr string, out *Client) bool {
-	m._mu.Lock()
-	defer m._mu.Unlock()
-	c, exists := m._clientsMap[addr]
+func (m *ClientMap) Flush(out []*Client) int32 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return int32(copy(out, m.clientsList))
+}
+
+func (m *ClientMap) TryGet(addr string, out *Client) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, exists := m.clientsMap[addr]
 	if exists {
 		*out = *c
 	}
@@ -111,10 +158,11 @@ func (m *ClientMap) tryGet(addr string, out *Client) bool {
 }
 
 // This function will be removed when we add a database support.
-func (m *ClientMap) existsWithName(addr string, name string) bool {
-	m._mu.Lock()
-	defer m._mu.Unlock()
-	c, exists := m._clientsMap[addr]
+// So we make a query into a database instead of searching in a map.
+func (m *ClientMap) ExistsWithName(addr string, name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, exists := m.clientsMap[addr]
 	if exists && strings.Compare(c.name, name) == 0 {
 		return true
 	}
@@ -122,8 +170,8 @@ func (m *ClientMap) existsWithName(addr string, name string) bool {
 }
 
 type Session struct {
-	name               string
 	clients            *ClientMap
+	pendingClients     map[string]*Client
 	timer              *time.Timer
 	duration           time.Duration
 	timeoutCh          chan struct{}
@@ -141,14 +189,11 @@ type Session struct {
 	stats              sts.Stats // atomic
 	backend            bk.DatabaseBackend
 	chatHistory        ChatHistory
-
 	// When a session starts, we should upload all the client names from our backend database
 	// into a runtimeDB, so we can operate on a map itself, rather than making queries to a database
 	// when we need to verify user's name.
 	// runtimeDB map[string]bool
 }
-
-var log = lgr.NewLogger("debug")
 
 func NewSession(settings *Settings) *Session {
 	const timeout = 10000 * time.Millisecond
@@ -185,16 +230,16 @@ func NewSession(settings *Settings) *Session {
 
 		log.Info().Msgf("using backend: %s", bk.BackendTypeStr(settings.BackendType))
 
-	case bk.BackendType_Memory: // never fails
-		dbBackend = bk_memory.NewMemoryBackend()
+	case bk.BackendType_Memory:
+		dbBackend = bk_memory.NewMemBackend()
 		log.Info().Msgf("using backend: %s", bk.BackendTypeStr(settings.BackendType))
 
 	default:
 		log.Warn().Msgf("[%s] is not supported", bk.BackendTypeStr(settings.BackendType))
-		dbBackend = bk_memory.NewMemoryBackend()
+		dbBackend = bk_memory.NewMemBackend()
 	}
 
-	// lc := net.ListenConfig{} // for TLS connection
+	lc := net.ListenConfig{} // for TLS connection
 	listener, err := net.Listen(settings.NetworkProtocol, settings.Addr)
 	if err != nil {
 		log.Error().Msgf("failed to created a listener: %v", err.Error())
@@ -282,69 +327,13 @@ func disconnectIdleClient(conn net.Conn, abortCh, quitCh chan struct{}) {
 	}
 }
 
-func (s *Session) readClientName(conn net.Conn, receiver string) bool {
-	const clientNameMaxBytes = 256
-	s.sessionMessagesCh <- newSessionMsg(receiver, []byte("@name:"))
-
-	buf := make([]byte, 4096)
-	for {
-		bytesRead, err := conn.Read(buf)
-		if err != nil && err != io.EOF {
-			log.Error().Msgf("failed to read from a connection: %s", conn.RemoteAddr().String())
-			return false
-		}
-
-		// Opposite side closed the connection
-		if bytesRead == 0 {
-			return false
-		}
-
-		// Ideally, the validation has to be done on the client side,
-		// but since this is a cli application, we have no choise other than
-		// process it on the server side, when we receiver actual bytes.
-		if bytesRead > clientNameMaxBytes {
-			// Notify a client that the name was too long.
-			contents := []byte(fmt.Sprintf("@name: [%s] exceeds 256 chars", buf[:bytesRead]))
-			s.sessionMessagesCh <- newSessionMsg(receiver, contents)
-
-			// Send a message to enter a different name.
-			s.sessionMessagesCh <- newSessionMsg(receiver, []byte("@name:"))
-			continue
-		}
-
-		clientName := string(common.StripCR(buf, bytesRead))
-
-		// if s.backend.HasClient(expectedClientName) {
-		// 	// send a message that a client already exists.
-		// 	// Is it expensive to make a database query every time in a for loop?
-		// 	// Maybe a better approach would be to cache all the clients on session's startup,
-		// 	// maybe in a map, and then make a lookup in a map itself rather than making a query into the database.
-		// } else {
-		// 	// append client to a database
-		// 	// s.backend.RegisterClient(expectedClientName, remoteAddr, "connected", time.Now())
-		// }
-
-		if s.clients.existsWithName(receiver, clientName) {
-			// Notify a client that this name is already occupied by someone else,
-			// and request to specify a different one.
-			contents := []byte(fmt.Sprintf("@name: [%s] already exists", clientName))
-			s.sessionMessagesCh <- newSessionMsg(receiver, contents)
-
-			s.sessionMessagesCh <- newSessionMsg(receiver, []byte("@name:"))
-		} else {
-			// Update status from Pending to Connected.
-			s.clients.updateStatus(receiver, ClientStatus_Connected)
-
-			s.clients.assignName(receiver, clientName)
-
-			log.Info().Msgf("client: [%s] was connected", clientName)
-
-			return true
-		}
-	}
-}
-
 func (s *Session) handleConnection(conn net.Conn) {
+	connReader := ConnReader{
+		conn:     conn,
+		state:    ConnReader_ProcessingMenu_State,
+		substate: None_SubState,
+	}
+
 	abortCh := make(chan struct{})
 	quitCh := make(chan struct{})
 
@@ -358,61 +347,172 @@ func (s *Session) handleConnection(conn net.Conn) {
 
 	s.onSessionJoinCh <- thisClient
 
-	if s.readClientName(conn, thisClient.ipAddr) {
-		if s.nClients.Load() > 1 {
-			// Notify all other clients about a new joiner
-			// thisClient.name has to be used instead of its IP address,
-			// since at this point it should be already available.
-			contents := []byte(fmt.Sprintf("client: [%s] joined", thisClient.name))
-			exclude := thisClient.ipAddr
-			s.greetingMessagesCh <- newGreetingMsg(contents, exclude)
+	s.displayMenu(conn, thisClient.ipAddr)
 
-			// Display the list of all participants to this client
-			s.listParticipants(conn, thisClient.ipAddr)
+	var clientName string
 
-			// TODO: The history is not display correctly,
-			// some messages are cut.
+	listClientsAndChatHistory := func() {
+		contents := []byte(fmt.Sprintf("client: [%s] joined", thisClient.name))
+		exclude := thisClient.ipAddr
+		s.greetingMessagesCh <- NewGreetingMsg(contents, exclude)
+		s.listParticipants(conn, thisClient.ipAddr)
+		if s.chatHistory.Size() != 0 {
+			s.displayChatHistory(conn, thisClient.ipAddr)
+		}
+	}
 
-			// Display a chat history
-			if s.chatHistory.size() != 0 {
-				s.displayChatHistory(conn, thisClient.ipAddr)
+Loop:
+	for {
+		buffer := make([]byte, 4096)
+		bytesRead, err := conn.Read(buffer)
+
+		// This should be a part of connection reader
+		if err != nil && err != io.EOF {
+			// If the client was idle for too long, it will be automatically disconnected from the session.
+			// Multiplexing is used to differentiate between an error, and us, who closed the connection intentionally.
+			select {
+			case <-quitCh:
+				// Notify the client that it will be disconnected
+				contents := []byte("you were idle for too long, disconnecting")
+				s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, contents)
+
+				log.Info().Msgf("client: [%s]: has been idle for too long, disconnecting", thisClient.name)
+			default:
+				log.Error().Msgf("failed to read bytes from the client: %s", err.Error())
 			}
+			break
 		}
 
-		buf := make([]byte, 4096)
-		for {
-			nBytes, err := conn.Read(buf)
-			if err != nil && err != io.EOF {
-				// If the client was idle for too long, it will be automatically disconnected from the session.
-				// Multiplexing is used to differentiate between an error, and us, who closed the connection intentionally.
-				select {
-				case <-quitCh:
-					// Notify the client that it will be disconnected
-					contents := []byte("you were idle for too long, disconnecting")
-					s.sessionMessagesCh <- newSessionMsg(thisClient.ipAddr, contents)
+		// An opposite side closed the connection,
+		// break out from a for loop and send a client left message.
+		if bytesRead == 0 {
+			break
+		}
 
-					log.Info().Msgf("client: [%s]: has been idle for too long, disconnecting", thisClient.name)
-				default:
-					log.Error().Msgf("failed to read bytes from the client: %s", err.Error())
+		input := string(common.StripCR(buffer, bytesRead))
+
+		switch connReader.state {
+		case ConnReader_ProcessingMenu_State:
+			if strings.Compare(input, "1") == 0 { // TODO: Introduce names for commands, so we don't compare against raw strings
+				connReader.state = ConnReader_RegisteringNewClient_State
+			} else if strings.Compare(input, "2") == 0 {
+				connReader.state = ConnReader_AuthenticatingClient_State
+			} else if strings.Compare(input, "3") == 0 {
+				break Loop
+			} else if strings.Compare(input, "4") == 0 {
+				connReader.state = ConnReader_CreatingChannel_State
+				connReader.substate = ConnReader_ReadingClientsName_SubState
+			} else {
+				// don't change the state, just send a warning message that such command doesn't exist
+			}
+		case ConnReader_RegisteringNewClient_State:
+			if connReader.substate == ConnReader_ReadingClientsName_SubState {
+				if bytesRead > CLIENT_NAME_MAX_LEN {
+					msg := []byte(fmt.Sprintf("name cannot exceed %d characters", CLIENT_NAME_MAX_LEN))
+					s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, msg)
+					s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, []byte("@name: ")) // TODO(alx): replace with variable
+				} else {
+					if s.backend.HasClient(input) {
+						msg := []byte("Name is occupied, try a different one")
+						s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, msg)
+						s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, []byte("@name: ")) // TODO(alx): replace with variable
+					} else {
+						connReader.substate = ConnReader_ReadingClientsPassword_SubState
+
+						// save client name
+						clientName = input
+
+						// STUDY: Use pending map instead of s.clients, and once we retrieved all the credentials,
+						// we can put it into s.clients map and in a database.
+						// We should use IP address as a key in a hash map, use name instead,
+						// because how do we check whether clients exists?
+						// mu := sync.Mutex{}
+						// mu.Lock()
+						var client Client
+						s.clients.TryGet(thisClient.ipAddr, &client)
+						client.SetName(input)
+						// mu.Unlock()
+					}
 				}
-				break
+			} else if connReader.substate == ConnReader_ReadingClientsPassword_SubState {
+				if bytesRead > CLIENT_PASSWORD_MAX_LEN {
+					warningContents := []byte(fmt.Sprintf("password cannot exceed %d characters", CLIENT_PASSWORD_MAX_LEN))
+					s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, warningContents)
+					s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, []byte("@password: "))
+				} else {
+					connReader.substate = None_SubState
+					connReader.state = ConnReader_ProcessingClientMessages_State
+
+					// Insert a new client into a backing storage
+					// `input` is our password, but most likely we would have to encode it using base64,
+					// so we don't store raw data in a storage
+					s.backend.RegisterNewClient(clientName, thisClient.ipAddr, "online", input, thisClient.joinTime)
+
+					var client Client
+					s.clients.TryGet(thisClient.ipAddr, &client)
+					log.Info().Msgf("client [%s] was registered", client.name)
+
+					// Notify all participants in a session about new joiner.
+					// List participants list and a chat history to a newly arrived client.
+					if s.nClients.Load() > 1 {
+						listClientsAndChatHistory()
+					}
+				}
 			}
 
-			// An opposite side closed the connection,
-			// break out from a for loop and send a client left message.
-			if nBytes == 0 {
-				break
+		case ConnReader_AuthenticatingClient_State: // log in
+			if connReader.substate == ConnReader_ReadingClientsName_SubState {
+				if bytesRead > CLIENT_NAME_MAX_LEN {
+					msg := []byte(fmt.Sprintf("name cannot exceed %d characters", CLIENT_NAME_MAX_LEN))
+					s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, msg)
+					s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, []byte("@name: ")) // TODO(alx): replace with variable
+				} else {
+					if !s.backend.HasClient(input) {
+						msg := []byte(fmt.Sprintf("client with name [%s] doesn't exist"))
+						s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, msg)
+						s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, []byte("@name: "))
+					} else {
+						// make a state transition to processing password
+						connReader.substate = ConnReader_ReadingClientsPassword_SubState
+
+						// save client's name
+						clientName = input
+					}
+				}
+			} else if connReader.substate == ConnReader_ReadingClientsPassword_SubState {
+				if bytesRead > CLIENT_PASSWORD_MAX_LEN {
+					// TODO: Collapse into a function
+					msg := []byte(fmt.Sprintf("password cannot exceed %d characters", CLIENT_PASSWORD_MAX_LEN))
+					s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, msg)
+					s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, []byte("@password: "))
+				} else {
+					if !s.backend.MatchClientPassword(clientName, input) {
+						// prompt client to enter a new password
+						msg := []byte("password isn't correct")
+						s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, msg)
+						s.sessionMessagesCh <- NewSessionMsg(thisClient.ipAddr, []byte("@password: "))
+					} else {
+						connReader.substate = None_SubState
+						connReader.state = ConnReader_ProcessingClientMessages_State
+
+						// Notify all participants in a session about new joiner.
+						// List participants list and a chat history to a newly arrived client.
+						if s.nClients.Load() > 1 {
+							listClientsAndChatHistory()
+						}
+					}
+				}
 			}
 
-			// Client has receiver a message, abort disconnecting.
-			abortCh <- struct{}{}
+		case ConnReader_ProcessingClientMessages_State:
+			s.clientMessagesCh <- NewClientMsg(thisClient.ipAddr, thisClient.name, buffer[:bytesRead])
 
-			// Would it be possible to serialize the message, send it as bytes,
-			// and then deserialize it on the client side?
-			// so, the message would have a header and a body
-			// containing an actual contents.
-			s.clientMessagesCh <- newClientMsg(thisClient.ipAddr, thisClient.name, buf[:nBytes])
+		case ConnReader_CreatingChannel_State:
+			panic("Creating channels is not supported!")
 		}
+
+		// Client has receiver a message, abort disconnecting.
+		abortCh <- struct{}{}
 	}
 
 	s.onSessionLeaveCh <- thisClient.ipAddr
@@ -421,9 +521,8 @@ func (s *Session) handleConnection(conn net.Conn) {
 	if s.nClients.Load() > 1 {
 		contents := []byte(fmt.Sprintf("client: [%s] left", thisClient.name))
 		exclude := thisClient.ipAddr
-		s.greetingMessagesCh <- newGreetingMsg(contents, exclude)
+		s.greetingMessagesCh <- NewGreetingMsg(contents, exclude)
 	}
-
 	conn.Close()
 }
 
@@ -437,7 +536,7 @@ func (s *Session) processConnections() {
 
 			s.stats.ClientsJoined.Add(1)
 
-			s.clients.add(client.ipAddr, client)
+			s.clients.Push(client.ipAddr, client)
 			s.nClients.Add(1)
 			s.timer.Stop()
 
@@ -446,7 +545,7 @@ func (s *Session) processConnections() {
 
 			s.stats.ClientsLeft.Add(1)
 
-			s.clients.updateStatus(addr, ClientStatus_Disconnected)
+			s.clients.UpdateStatus(addr, ClientStatus_Disconnected)
 			s.nClients.Add(-1)
 
 			// Reset the timer if all clients left the session.
@@ -458,12 +557,22 @@ func (s *Session) processConnections() {
 			log.Info().Msgf("received message: %s", string(msg.contents))
 
 			// Add message to the chat history
-			s.chatHistory.push(msg)
+			s.chatHistory.Push(msg)
+
+			if DEBUG_ENABLED {
+				size := s.chatHistory.Size()
+				msgs := make([]ClientMessage, size)
+				nCopied := s.chatHistory.Flush(msgs)
+				log.Info().Msgf("messages copied: %d", nCopied)
+				for _, msg := range msgs {
+					log.Info().Msg(msg.format())
+				}
+			}
 
 			s.stats.MessagesReceived.Add(1)
 
-			clients := make([]*Client, s.clients.size())
-			s.clients.getClients(clients)
+			clients := make([]*Client, s.clients.Size())
+			s.clients.Flush(clients)
 
 			for _, client := range clients {
 				if client.matchStatus(ClientStatus_Connected) {
@@ -488,9 +597,9 @@ func (s *Session) processConnections() {
 		case msg := <-s.sessionMessagesCh:
 			// Broadcast the message to a particular receiver
 			var client Client
-			if s.clients.tryGet(msg.receiver, &client) {
+			if s.clients.TryGet(msg.receiver, &client) {
 				if !client.matchStatus(ClientStatus_Disconnected) {
-					formatedMsg := []byte(fmt.Sprintf("[%s] %s", msg.sendTime.Format(time.DateTime), string(msg.contents)))
+					formatedMsg := msg.format()
 					formatedMsgSize := int64(len(formatedMsg))
 					bytesWritten, err := writeBytesToClient(&client, formatedMsg, int64(formatedMsgSize))
 					if err != nil {
@@ -506,8 +615,8 @@ func (s *Session) processConnections() {
 		case msg := <-s.greetingMessagesCh:
 			// Greeting messages should be broadcasted to all the clients, except sender,
 			// which is specified inside exclude list.
-			clients := make([]*Client, s.clients.size())
-			s.clients.getClients(clients)
+			clients := make([]*Client, s.clients.Size())
+			s.clients.Flush(clients)
 
 			for _, client := range clients {
 				if client.matchStatus(ClientStatus_Disconnected) {
@@ -556,40 +665,54 @@ func writeBytesToClient(client *Client, contents []byte, contentsSize int64) (in
 // as well, so we can better track down send/received messages (in one place),
 // instead of calling conn.Write function everywhere in the code and trying to handle if it fails.
 // But we would have to define a notion how do distinguish between different message types.
+// Maybe we have protect the whole struct with a mutex. What if the size changes?
 func (s *Session) listParticipants(conn net.Conn, receiverIpAddr string) {
-	clients := make([]*Client, s.clients.size())
-	s.clients.getClients(clients)
+	size := s.clients.Size()
+	clients := make([]*Client, size)
+	p := make([]string, size)
 
-	sessionParticipants := "participants: "
+	s.clients.Flush(clients)
 
 	for _, client := range clients {
 		if client.matchStatus(ClientStatus_Pending) {
 			continue
 		}
-
-		status := "disconnected"
+		var status string
 		if client.matchStatus(ClientStatus_Connected) {
-			status, _ = strings.CutPrefix(status, "dis")
+			status = "online"
+		} else if client.matchStatus(ClientStatus_Disconnected) {
+			status = "offline"
 		}
-
-		sessionParticipants += fmt.Sprintf("\n[%s] *%s", client.name, status)
+		p = append(p, fmt.Sprintf("\t[%s] *%s", client.name, status))
 	}
-
-	s.sessionMessagesCh <- newSessionMsg(receiverIpAddr, []byte(sessionParticipants))
+	participants := strings.Join(p, "\n")
+	participants = "participants:\n" + participants
+	s.sessionMessagesCh <- NewSessionMsg(receiverIpAddr, []byte(participants), true)
 }
 
 // When new client joins, we should display all available participants and a whole chat history.
 // This whole function most likely should be protected with a mutex.
 // conn is a new joiner.
 func (s *Session) displayChatHistory(conn net.Conn, receiverIpAddr string) {
-	messages := make([]ClientMessage, s.chatHistory.size())
-	s.chatHistory.flush(messages)
+	messages := make([]ClientMessage, s.chatHistory.Size())
+	s.chatHistory.Flush(messages)
 
-	history := make([]string, s.chatHistory.size())
+	history := make([]string, s.chatHistory.Size())
 	for _, msg := range messages {
-		fmtMsg := fmt.Sprintf("%s [%s]: %s", msg.sendTime.Format(time.DateTime), msg.senderName, string(msg.contents))
-		history = append(history, fmtMsg)
+		history = append(history, msg.format())
+	}
+	s.sessionMessagesCh <- NewSessionMsg(receiverIpAddr, []byte(strings.Join(history, "\n")))
+}
+
+func (s *Session) displayMenu(conn net.Conn, receiverIpAddr string) {
+	const ignoreTime = true
+
+	options := make([]string, len(menu))
+
+	for i := 0; i < len(menu); i++ {
+		options = append(options, fmt.Sprintf("\t%s\n", menu[i]))
 	}
 
-	s.sessionMessagesCh <- newSessionMsg(receiverIpAddr, []byte(strings.Join(history, "\n")))
+	menu := "Menu:\n" + strings.Join(options, "")
+	s.sessionMessagesCh <- NewSessionMsg(receiverIpAddr, []byte(menu), ignoreTime)
 }

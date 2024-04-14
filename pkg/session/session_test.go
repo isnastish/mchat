@@ -1,7 +1,7 @@
 package session
 
 import (
-	bk "github.com/isnastish/chat/pkg/backend"
+	bk "github.com/isnastish/chat/pkg/session/backend"
 	"github.com/stretchr/testify/assert"
 	"net"
 	"testing"
@@ -26,4 +26,8 @@ func TestConnectionEstablished(t *testing.T) {
 
 	assert.Equal(t, 1, int(s.stats.ClientsJoined.Load()))
 	assert.Equal(t, 1, int(s.stats.ClientsLeft.Load()))
+}
+
+func TestClientWithNameAlreadyExists(t *testing.T) {
+
 }

@@ -15,6 +15,7 @@ type Client struct {
 	conn     net.Conn
 	ipAddr   string
 	name     string
+	password string // has to be hashed
 	status   int32
 	joinTime time.Time
 }
