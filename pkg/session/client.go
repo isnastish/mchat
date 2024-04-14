@@ -5,21 +5,22 @@ import (
 	"time"
 )
 
+type ClientState int32
+
 const (
-	ClientStatus_Connected int32 = iota
-	ClientStatus_Disconnected
-	ClientStatus_Pending
+	ClientState_Pending ClientState = iota + 1
+	ClientState_Connected
+	ClientState_Disconnected
 )
 
 type Client struct {
-	conn     net.Conn
-	ipAddr   string
-	name     string
-	password string // has to be hashed
-	status   int32
-	joinTime time.Time
+	Conn     net.Conn
+	IpAddr   string
+	Name     string
+	JoinTime time.Time
+	State    ClientState
 }
 
-func (c *Client) matchStatus(status int32) bool {
-	return c.status == status
+func (c *Client) MatchState(state ClientState) bool {
+	return c.State == state
 }

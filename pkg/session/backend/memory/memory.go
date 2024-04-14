@@ -12,12 +12,12 @@ type SentMessage struct {
 }
 
 type ClientData struct {
-	name         string
-	addr         string // not neccessary
-	password     string
-	status       string // online | offline (not neccessary)
-	sentMessages []SentMessage
-	connTime     t.Time
+	name           string
+	addr           string // not neccessary, because it changes
+	passwordSha256 string
+	status         string // online | offline (not neccessary)
+	sentMessages   []SentMessage
+	connTime       t.Time
 }
 
 type MemBackend struct {
@@ -28,12 +28,12 @@ var log = lgr.NewLogger("debug")
 
 func NewClient(name_ string, addr_ string, password_ string, status_ string, connTime_ t.Time) *ClientData {
 	return &ClientData{
-		name:         name_,
-		addr:         addr_,
-		password:     password_,
-		status:       status_,
-		connTime:     connTime_,
-		sentMessages: make([]SentMessage, 0),
+		name:           name_,
+		addr:           addr_,
+		passwordSha256: password_,
+		status:         status_,
+		connTime:       connTime_,
+		sentMessages:   make([]SentMessage, 0),
 	}
 }
 
@@ -52,7 +52,7 @@ func (b *MemBackend) MatchClientPassword(name string, password string) bool {
 	log.Info().Msgf("matching a password [%s] for client [%s]", password, name)
 	client, exists := b.storage[name]
 	if exists {
-		if strings.Compare(client.password, password) == 0 {
+		if strings.Compare(client.passwordSha256, password) == 0 {
 			return true
 		}
 	}

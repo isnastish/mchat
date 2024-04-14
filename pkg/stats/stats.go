@@ -19,6 +19,9 @@ type Stats struct {
 	ClientsJoined   atomic.Int32 // should only be accessible by the server
 	ClientsLeft     atomic.Int32 // should only be accessible by the server
 	ClientsRejoined atomic.Int32 // should only be accessible by the server
+
+	ConnCount        int32
+	ConnAbortedCount int32
 }
 
 var names = map[int]string{
