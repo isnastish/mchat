@@ -81,16 +81,16 @@ Loop:
 		case msg := <-c.incommingCh:
 			c.stats.MessagesReceived.Add(1)
 			msgStr := string(msg.data)
+			// TODO:
 			// Introduce a table of reserved commands. All commans should be prefixed with @ to distinguish between regular messages.
-			// @name:
-			// @new_channel: (for example)
-			// @list_participants ...
+			// @name, @new_channel, @list_participants ...
 			if strings.Contains(msgStr, "@name:") {
+				fmt.Printf("%s", msgStr)
+			} else if strings.Contains(msgStr, "@password:") {
 				fmt.Printf("%s", msgStr)
 			} else {
 				fmt.Printf("%s\n", msgStr)
 			}
-			// log.Info().Msgf("received message: %s", string(msg.data))
 
 		case msg := <-c.outgoingCh:
 			messageSize := len(msg.data)
@@ -124,18 +124,16 @@ func (c *Client) recv() {
 	buf := make([]byte, 4096)
 
 	for {
-		// If the client has been disconnected manually, we have to shutdown it completely
 		nbytes, err := c.remoteConn.Read(buf)
 		if err != nil && err != io.EOF {
 			log.Error().Msgf("failed to read from the remote connnection: %s", err.Error())
-			// should we shutdown this client or handle it more gracefully?
-			// Since send() function is still running, we cannot cancel recv function.
+			c.remoteConn.Close()
+			close(c.quitCh)
 			break
 		}
 
 		if nbytes == 0 {
 			log.Info().Msg("remote session closed the connection")
-			// force the send() goroutine to complete
 			close(c.quitCh)
 			return
 		}

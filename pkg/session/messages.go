@@ -1,51 +1,129 @@
 package session
 
 import (
+	"fmt"
+	"sync"
 	t "time"
 )
 
-// Client messages are broadcasted to all the connected clients in a current session,
-// that's why they don't have a specific receiver, as SessionMessage instance.
+// TODO: Modify Greeting messages so we don't pass a pointer to a client to be excluded.
+// The same applies to SessionMessage's Recipient
+// And don't capitalize fields if they're not used by external packages.
+// TODO: Remove all the client pointers to Client and only maintain strings.
+// Make it as simple as possible.
+
+type Message interface {
+	Format() ([]byte, int)
+}
+
 type ClientMessage struct {
-	senderIpAddr string // ?
-	senderName   string
-	sendTime     t.Time
-	contents     []byte
+	Contents     []byte
+	SenderName   string
+	SenderIpAddr string // TODO: Most likely we don't need an api address, it's not being used.
+	SendTime     t.Time
 }
 
-func newClientMsg(senderIpAddr string, senderName string, contents []byte) *ClientMessage {
-	return &ClientMessage{
-		senderIpAddr: senderIpAddr,
-		senderName:   senderName,
-		sendTime:     t.Now(),
-		contents:     contents,
-	}
-}
-
+// TODO: Think about better name
 type SessionMessage struct {
-	receiver string
-	sendTime t.Time // string?
-	contents []byte
+	Recipient  *Client
+	Contents   []byte
+	SendTime   t.Time
+	IgnoreTime bool
 }
 
-func newSessionMsg(receiver string, contents []byte) *SessionMessage {
-	return &SessionMessage{
-		receiver: receiver,
-		contents: contents,
-		sendTime: t.Now(),
-	}
-}
-
+// TODO: Give more descriptive name
 type GreetingMessage struct {
-	sendTime t.Time
-	contents []byte
-	exclude  string
+	SendTime t.Time
+	Contents []byte
+	Exclude  *Client
 }
 
-func newGreetingMsg(contents []byte, exclude string) *GreetingMessage {
-	return &GreetingMessage{
-		sendTime: t.Now(),
-		contents: contents,
-		exclude:  exclude,
+type MessageHistory struct {
+	messages []ClientMessage
+	count    int
+	cap      int
+	mu       sync.Mutex
+}
+
+func NewClientMsg(senderIpAddr string, senderName string, contents []byte) *ClientMessage {
+	return &ClientMessage{
+		Contents:     contents,
+		SenderName:   senderName,
+		SenderIpAddr: senderIpAddr,
+		SendTime:     t.Now(),
 	}
+}
+
+func NewSessionMsg(recipient *Client, contents []byte, ignoreTime ...bool) *SessionMessage {
+	var ignore bool
+
+	if len(ignoreTime) > 0 {
+		ignore = ignoreTime[0]
+	}
+
+	return &SessionMessage{
+		Recipient:  recipient,
+		Contents:   contents,
+		SendTime:   t.Now(),
+		IgnoreTime: ignore,
+	}
+}
+
+func NewGreetingMsg(exclude *Client, contents []byte) *GreetingMessage {
+	return &GreetingMessage{
+		SendTime: t.Now(),
+		Contents: contents,
+		Exclude:  exclude,
+	}
+}
+
+func (m *SessionMessage) Format() ([]byte, int) {
+	if m.IgnoreTime {
+		return m.Contents, len(m.Contents)
+	}
+
+	res := []byte(fmt.Sprintf("[%s] %s", m.SendTime.Format(t.DateTime), string(m.Contents)))
+	size := len(res)
+
+	return res, size
+}
+
+func (m *ClientMessage) Format() ([]byte, int) {
+	res := []byte(fmt.Sprintf("[%s] [%s] %s", m.SendTime.Format(t.DateTime), m.SenderName, string(m.Contents)))
+	size := len(res)
+
+	return res, size
+}
+
+func (m *GreetingMessage) Format() ([]byte, int) {
+	res := []byte(fmt.Sprintf("[%s] %s", m.SendTime.Format(t.DateTime), string(m.Contents)))
+	size := len(res)
+
+	return res, size
+}
+
+func (h *MessageHistory) addMessage(msg *ClientMessage) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.count >= h.cap {
+		new_cap := max(h.cap+1, h.cap<<2)
+		new_messages := make([]ClientMessage, new_cap)
+		copy(new_messages, h.messages)
+		h.messages = new_messages
+		h.cap = new_cap
+	}
+	h.messages[h.count] = *msg
+	h.count++
+}
+
+func (h *MessageHistory) size() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.count
+}
+
+func (h *MessageHistory) flush(out []ClientMessage) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return copy(out, h.messages)
 }

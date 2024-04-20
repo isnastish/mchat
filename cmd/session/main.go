@@ -5,8 +5,8 @@ import (
 	"os"
 	"strconv"
 
-	bk "github.com/isnastish/chat/pkg/backend"
 	"github.com/isnastish/chat/pkg/session"
+	bk "github.com/isnastish/chat/pkg/session/backend"
 )
 
 func main() {
@@ -24,5 +24,5 @@ func main() {
 	}
 
 	s := session.NewSession(&settings)
-	s.AcceptConnections()
+	s.Run()
 }
