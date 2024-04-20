@@ -24,5 +24,5 @@ func main() {
 	}
 
 	s := session.NewSession(&settings)
-	s.AcceptConnections()
+	s.Run()
 }

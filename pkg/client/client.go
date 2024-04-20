@@ -81,16 +81,16 @@ Loop:
 		case msg := <-c.incommingCh:
 			c.stats.MessagesReceived.Add(1)
 			msgStr := string(msg.data)
+			// TODO:
 			// Introduce a table of reserved commands. All commans should be prefixed with @ to distinguish between regular messages.
-			// @name:
-			// @new_channel: (for example)
-			// @list_participants ...
+			// @name, @new_channel, @list_participants ...
 			if strings.Contains(msgStr, "@name:") {
+				fmt.Printf("%s", msgStr)
+			} else if strings.Contains(msgStr, "@password:") {
 				fmt.Printf("%s", msgStr)
 			} else {
 				fmt.Printf("%s\n", msgStr)
 			}
-			// log.Info().Msgf("received message: %s", string(msg.data))
 
 		case msg := <-c.outgoingCh:
 			messageSize := len(msg.data)

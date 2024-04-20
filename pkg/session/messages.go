@@ -2,8 +2,17 @@ package session
 
 import (
 	"fmt"
+	"sync"
 	t "time"
 )
+
+// TODO: Modify Greeting messages so we don't pass a pointer to a client to be excluded.
+// The same applies to SessionMessage's Recipient
+// And don't capitalize fields if they're not used by external packages.
+
+type Message interface {
+	Format() ([]byte, int)
+}
 
 type ClientMessage struct {
 	Contents     []byte
@@ -25,6 +34,13 @@ type GreetingMessage struct {
 	SendTime t.Time
 	Contents []byte
 	Exclude  *Client
+}
+
+type ChatHistory struct {
+	messages []ClientMessage
+	count    int32
+	cap      int32
+	mu       sync.Mutex
 }
 
 func NewClientMsg(senderIpAddr string, senderName string, contents []byte) *ClientMessage {
@@ -78,8 +94,35 @@ func (m *ClientMessage) Format() ([]byte, int) {
 }
 
 func (m *GreetingMessage) Format() ([]byte, int) {
-	res := []byte(fmt.Sprintf("[%s] [%s] %s", m.SendTime.Format(t.DateTime), string(m.Contents)))
+	res := []byte(fmt.Sprintf("[%s] %s", m.SendTime.Format(t.DateTime), string(m.Contents)))
 	size := len(res)
 
 	return res, size
+}
+
+// TODO: Rename to AddMessage
+func (h *ChatHistory) Push(msg *ClientMessage) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.count >= h.cap {
+		new_cap := max(h.cap+1, h.cap<<2)
+		new_messages := make([]ClientMessage, new_cap)
+		copy(new_messages, h.messages)
+		h.messages = new_messages
+		h.cap = new_cap
+	}
+	h.messages[h.count] = *msg
+	h.count++
+}
+
+func (h *ChatHistory) Size() int32 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.count
+}
+
+func (h *ChatHistory) Flush(out []ClientMessage) int32 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return int32(copy(out, h.messages))
 }
