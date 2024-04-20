@@ -1,11 +1,10 @@
 package session
 
 import (
-	"fmt"
 	"net"
 	"strings"
 	"testing"
-	_ "time"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/goleak"
@@ -14,7 +13,7 @@ import (
 	bk "github.com/isnastish/chat/pkg/session/backend"
 )
 
-type TestClient struct {
+type _Client struct {
 	name     string
 	password string
 }
@@ -25,8 +24,7 @@ var settings = Settings{
 	BackendType:     bk.BackendType_Memory,
 }
 
-// TODO: We have a bug when running more than 2 clients.
-var clients = []TestClient{
+var clients = []_Client{
 	{"Ivan Ivanov", "ThisIsI1sPassw0rd"},
 	{"Mark Lutz", "Some_other_password"},
 	{"Johan Novak", "johans_pathword_234"},
@@ -37,17 +35,43 @@ var clients = []TestClient{
 	{"Ivan Istberg", "234340_sdfsdfuu"},
 	{"Noir Nasaiier", "tyheroi_34234"},
 	{"Mark Zuckerberg", "mark_zuckergerg_2033"},
+}
 
-	// {"sdfvan Ivanov", "ThisIsI1sPassw0rd"},
-	// {"sdfark Lutz", "Some_other_password"},
-	// {"sdfohan Novak", "johans_pathword_234"},
-	// {"ffobin Hood", "bow_is_life_1024"},
-	// {"ddo Gang", "woo_gang_234234"},
-	// {"ddi Pu", "my_dog_2017"},
-	// {"ddanna Hoflan", "some_random_password_here"},
-	// {"dfsvan Istberg", "234340_sdfsdfuu"},
-	// {"sdfdoir Nasaiier", "tyheroi_34234"},
-	// {"sdfdark Zuckerberg", "mark_zuckergerg_2033"},
+func createClient(t *testing.T,
+	networkProtocol, address string,
+	testClient _Client,
+	mainCallback func(string, net.Conn) bool,
+	useMainCallbackInElseClause bool) {
+	conn, err := net.Dial(networkProtocol, address)
+	assert.Equal(t, err, nil)
+	for {
+		buf := make([]byte, 1024)
+		bRead, err := conn.Read(buf)
+		if err != nil || bRead == 0 {
+			return
+		}
+
+		input := string(common.StripCR(buf, bRead))
+
+		if strings.Contains(input, "Menu:") {
+			conn.Write([]byte(RegisterClientOption))
+		} else if strings.Contains(input, "@name:") {
+			conn.Write([]byte(testClient.name))
+		} else if strings.Contains(input, "@password:") {
+			conn.Write([]byte(testClient.password))
+			if !useMainCallbackInElseClause {
+				if mainCallback(input, conn) {
+					return
+				}
+			}
+		} else {
+			if useMainCallbackInElseClause {
+				if mainCallback(input, conn) {
+					return
+				}
+			}
+		}
+	}
 }
 
 func TestConnectionEstablished(t *testing.T) {
@@ -71,38 +95,16 @@ func TestRegisterNewClient(t *testing.T) {
 		s.Run()
 		close(doneCh)
 	}()
-
-	go func() { // not necessary
-		client, err := net.Dial(s.network, s.address)
-		assert.Equal(t, err, nil)
-		for {
-			buf := make([]byte, 1024)
-			bRead, err := client.Read(buf)
-			if err != nil || bRead == 0 {
-				return
-			}
-
-			input := string(common.StripCR(buf, bRead))
-			if strings.Contains(input, "Menu:") {
-				client.Write([]byte(RegisterClientOption))
-			} else if strings.Contains(input, "@name:") {
-				client.Write([]byte(clients[0].name))
-			} else if strings.Contains(input, "@password:") {
-				client.Write([]byte(clients[0].password))
-				break
-			}
-		}
-		fmt.Println("Closing the connection")
-		client.Close()
-	}()
+	createClient(t, settings.NetworkProtocol, settings.Addr, clients[0], func(input string, conn net.Conn) bool {
+		conn.Close()
+		return true
+	}, false)
 	<-doneCh
 	assert.True(t, s.backend.HasClient(clients[0].name))
 }
 
 func TestRegisterMultipeNewClients(t *testing.T) {
-	fmt.Println("start")
-	// Always enable this, because there some go routines in session.disconnectIdleClient found
-	// defer goleak.VerifyNone(t)
+	defer goleak.VerifyNone(t)
 
 	doneCh := make(chan struct{})
 	s := NewSession(&settings)
@@ -113,29 +115,10 @@ func TestRegisterMultipeNewClients(t *testing.T) {
 
 	for _, client := range clients {
 		c := client
-		// time.Sleep(1000 * time.Millisecond)
-		go func() {
-			client, err := net.Dial(s.network, s.address)
-			assert.Equal(t, err, nil)
-			for {
-				buf := make([]byte, 1024)
-				bRead, err := client.Read(buf)
-				if err != nil || bRead == 0 {
-					return
-				}
-
-				input := string(common.StripCR(buf, bRead))
-				if strings.Contains(input, "Menu:") {
-					client.Write([]byte(RegisterClientOption))
-				} else if strings.Contains(input, "@name:") {
-					client.Write([]byte(c.name))
-				} else if strings.Contains(input, "@password:") {
-					client.Write([]byte(c.password))
-					break
-				}
-			}
-			client.Close()
-		}()
+		go createClient(t, settings.NetworkProtocol, settings.Addr, c, func(input string, conn net.Conn) bool {
+			conn.Close()
+			return true
+		}, false)
 	}
 	<-doneCh
 
@@ -143,5 +126,30 @@ func TestRegisterMultipeNewClients(t *testing.T) {
 		assert.True(t, s.backend.HasClient(client.name))
 	}
 	assert.Equal(t, len(clients), s.clients.size())
-	fmt.Println("len(clients): ", len(clients))
+}
+
+func TestSecondClientReceivedMessages(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	message := "hello!"
+
+	doneCh := make(chan struct{})
+	s := NewSession(&settings)
+	go func() {
+		s.Run()
+		close(doneCh)
+	}()
+	go createClient(t, settings.NetworkProtocol, settings.Addr, clients[0], func(input string, conn net.Conn) bool {
+		time.Sleep(100 * time.Millisecond) // Do we need to sleep?
+		conn.Write([]byte(message))
+		conn.Close()
+		return true
+	}, false)
+
+	go createClient(t, settings.NetworkProtocol, settings.Addr, clients[1], func(input string, conn net.Conn) bool {
+		assert.True(t, strings.Contains(input, message))
+		conn.Close()
+		return true
+	}, true)
+
+	<-doneCh
 }
