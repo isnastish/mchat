@@ -9,6 +9,8 @@ import (
 // TODO: Modify Greeting messages so we don't pass a pointer to a client to be excluded.
 // The same applies to SessionMessage's Recipient
 // And don't capitalize fields if they're not used by external packages.
+// TODO: Remove all the client pointers to Client and only maintain strings.
+// Make it as simple as possible.
 
 type Message interface {
 	Format() ([]byte, int)
@@ -36,10 +38,10 @@ type GreetingMessage struct {
 	Exclude  *Client
 }
 
-type ChatHistory struct {
+type MessageHistory struct {
 	messages []ClientMessage
-	count    int32
-	cap      int32
+	count    int
+	cap      int
 	mu       sync.Mutex
 }
 
@@ -100,8 +102,7 @@ func (m *GreetingMessage) Format() ([]byte, int) {
 	return res, size
 }
 
-// TODO: Rename to AddMessage
-func (h *ChatHistory) Push(msg *ClientMessage) {
+func (h *MessageHistory) addMessage(msg *ClientMessage) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.count >= h.cap {
@@ -115,14 +116,14 @@ func (h *ChatHistory) Push(msg *ClientMessage) {
 	h.count++
 }
 
-func (h *ChatHistory) Size() int32 {
+func (h *MessageHistory) size() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.count
 }
 
-func (h *ChatHistory) Flush(out []ClientMessage) int32 {
+func (h *MessageHistory) flush(out []ClientMessage) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return int32(copy(out, h.messages))
+	return copy(out, h.messages)
 }

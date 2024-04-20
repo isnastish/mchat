@@ -53,13 +53,14 @@ const (
 	ConnSubstate_ReadingChannelName
 )
 
+// TODO: More descriptive name
 type ConnState struct {
-	Conn           net.Conn
-	State          int
-	Substate       int
-	ClientName     string
-	ClientPassword string
-	Input          []byte
+	conn           net.Conn
+	state          int
+	substate       int
+	clientName     string
+	clientPassword string
+	input          []byte
 }
 
 type Settings struct {
@@ -88,23 +89,21 @@ type Session struct {
 	// TODO: We need to protect the storage with a mutex.
 	// And we would have to protect clientsMap with a mutex as well.
 	backend     bk.DatabaseBackend
-	chatHistory ChatHistory
+	chatHistory MessageHistory
 	// When a session starts, we should upload all the client names from our backend database
 	// into a runtimeDB, so we can operate on a map itself, rather than making queries to a database
 	// when we need to verify user's name.
 	// runtimeDB map[string]bool
-	loggingEnabled bool // shouldn't be atomic, only reads are performed
+	loggingEnabled     bool // shouldn't be atomic, only reads are performed
+	onlineClientsCount atomic.Int32
 }
 
 // TODO: Pull out all global variables into its own struct
-const clientStatusOnline = "online"
-const clientStatusOffline = "offline"
 const clientNameMaxLen = 64
 const clientPasswordMaxLen = 256
 
 var clientNameMsg = []byte("@name: ")
 var clientPasswordMsg = []byte("@password: ")
-var log = lgr.NewLogger("debug")
 var menu = []string{
 	"[1] - Register",
 	"[2] - Log in",
@@ -115,18 +114,7 @@ var menu = []string{
 	"[4] - CreateChannel (not implemented)",
 	"[5] - List channels (not implemented)",
 }
-
-func (s *ConnState) Transition(newState int) {
-	if (newState == ConnState_RegisteringNewClient ||
-		newState == ConnState_AuthenticatingClient) &&
-		s.Substate == ConnSubstate_ReadingClientName {
-		// transition to processing the password
-		s.Substate = ConnSubstate_ReadingClientPassword
-	} else if newState == ConnState_CreatingChannel {
-		// transition to processing channels name
-		s.Substate = ConnSubstate_ReadingChannelName
-	}
-}
+var log = lgr.NewLogger("debug")
 
 func NewSession(settings *Settings) *Session {
 	const timeout = 10000 * time.Millisecond
@@ -197,7 +185,7 @@ func NewSession(settings *Settings) *Session {
 		quitCh:             make(chan struct{}),
 		timeoutCh:          make(chan struct{}),
 		backend:            dbBackend,
-		chatHistory:        ChatHistory{},
+		chatHistory:        MessageHistory{},
 	}
 }
 
@@ -209,8 +197,6 @@ func (s *Session) Run() {
 	go func() {
 		<-s.timeoutCh
 		close(s.quitCh)
-
-		// Close the listener to force Accept() to return an error.
 		s.listener.Close()
 	}()
 
@@ -229,10 +215,8 @@ Loop:
 			}
 			continue
 		}
-
 		go s.handleConnection(conn)
 	}
-
 	sts.DisplayStats(&s.stats, sts.Session)
 }
 
@@ -317,9 +301,9 @@ func (s *Session) handleConnection(conn net.Conn) {
 	// // Reset the timer if all clients left the session.
 
 	connState := ConnState{
-		Conn:     conn,
-		State:    ConnState_ProcessingMenu,
-		Substate: ConnSubstate_None,
+		conn:     conn,
+		state:    ConnState_ProcessingMenu,
+		substate: ConnSubstate_None,
 	}
 
 	onIdleClientDisconnectedCh := make(chan struct{})
@@ -374,20 +358,20 @@ Loop:
 			break
 		}
 
-		connState.Input = common.StripCR(buffer, bytesRead)
+		connState.input = common.StripCR(buffer, bytesRead)
 
-		switch connState.State {
+		switch connState.state {
 		case ConnState_ProcessingMenu:
-			switch string(connState.Input) {
+			switch string(connState.input) {
 			case RegisterClientOption:
 				// TODO: Collapse into a function
-				connState.State = ConnState_RegisteringNewClient
-				connState.Substate = ConnSubstate_ReadingClientName
+				connState.state = ConnState_RegisteringNewClient
+				connState.substate = ConnSubstate_ReadingClientName
 				s.sessionMessagesCh <- NewSessionMsg(newClient, clientNameMsg)
 
 			case AuthenticateClientOption:
-				connState.State = ConnState_AuthenticatingClient
-				connState.Substate = ConnSubstate_ReadingClientName
+				connState.state = ConnState_AuthenticatingClient
+				connState.substate = ConnSubstate_ReadingClientName
 				s.sessionMessagesCh <- NewSessionMsg(newClient, clientNameMsg)
 
 			case ShutDownClient:
@@ -395,11 +379,11 @@ Loop:
 				break Loop
 
 			case CreateNewChannel:
-				connState.State = ConnState_CreatingChannel
-				connState.Substate = ConnSubstate_ReadingChannelName
+				connState.state = ConnState_CreatingChannel
+				connState.substate = ConnSubstate_ReadingChannelName
 
 			default:
-				msg := []byte(fmt.Sprintf("Command [%s] is undefined", connState.Input))
+				msg := []byte(fmt.Sprintf("Command [%s] is undefined", connState.input))
 				s.sessionMessagesCh <- NewSessionMsg(newClient, msg)
 				s.displayMenu(newClient)
 			}
@@ -407,50 +391,49 @@ Loop:
 		// TODO: Combine ConnState_RegisteringNewClient and ConnState_AuthenticatingClient in a single state
 		// to avoid duplications
 		case ConnState_RegisteringNewClient:
-			if connState.Substate == ConnSubstate_ReadingClientName {
+			if connState.substate == ConnSubstate_ReadingClientName {
 				if bytesRead > clientNameMaxLen {
 					msg := []byte(fmt.Sprintf("name cannot exceed %d characters", clientNameMaxLen))
 					s.sessionMessagesCh <- NewSessionMsg(newClient, msg)
 					s.sessionMessagesCh <- NewSessionMsg(newClient, clientNameMsg)
 				} else {
-					if s.backend.HasClient(string(connState.Input)) {
-						msg := []byte(fmt.Sprintf("Name [%s] is occupied, try a different one", connState.Input))
+					if s.backend.HasClient(string(connState.input)) {
+						msg := []byte(fmt.Sprintf("Name [%s] is occupied, try a different one", connState.input))
 						s.sessionMessagesCh <- NewSessionMsg(newClient, msg)
 						s.sessionMessagesCh <- NewSessionMsg(newClient, clientNameMsg)
 					} else {
-						connState.Transition(ConnState_RegisteringNewClient)
-						connState.ClientName = string(connState.Input)
-						// send a messasge to the client to submit password
+						connState.state = ConnState_AuthenticatingClient
+						connState.substate = ConnSubstate_ReadingClientPassword
+						connState.clientName = string(connState.input)
 						s.sessionMessagesCh <- NewSessionMsg(newClient, clientPasswordMsg)
 					}
 				}
-			} else if connState.Substate == ConnSubstate_ReadingClientPassword {
+			} else if connState.substate == ConnSubstate_ReadingClientPassword {
 				if bytesRead > clientPasswordMaxLen {
 					msg := []byte(fmt.Sprintf("password cannot exceed [%d] characters", clientPasswordMaxLen))
 					s.sessionMessagesCh <- NewSessionMsg(newClient, msg)
 					s.sessionMessagesCh <- NewSessionMsg(newClient, clientPasswordMsg)
 				} else {
-					connState.Substate = ConnSubstate_None
-					connState.State = ConnState_ProcessingClientMessages
-					connState.ClientPassword = string(connState.Input)
+					connState.substate = ConnSubstate_None
+					connState.state = ConnState_ProcessingClientMessages
+					connState.clientPassword = string(connState.input)
 
-					// mu.Lock()
 					s.backend.RegisterNewClient(
-						connState.ClientName,
+						connState.clientName,
 						newClient.ipAddr,
-						clientStatusOnline,
-						common.Sha256([]byte(connState.Input)),
+						stateStr(ClientState_Connected),
+						common.Sha256([]byte(connState.input)),
 						newClient.joinTime,
 					)
 
 					// TODO: Handle a case when a client is connected from a different machine
 					// Check whether a client with this name already exists and is disconnected.
 					// Update its connection so we can read/write from it and change the ip address.
-					if s.clients.existsWithState(connState.ClientName, ClientState_Disconnected) {
-						s.clients.removeClient(connState.ClientName)
+					if s.clients.existsWithState(connState.clientName, ClientState_Disconnected) {
+						s.clients.removeClient(connState.clientName)
 					}
 
-					// client, exists := s.clientsMap[connState.ClientName]
+					// client, exists := s.clientsMap[connState.clientName]
 					// if exists {
 					// 	if client.State == ClientState_Disconnected {
 					// 		delete(s.clientsMap, newClient.ipAddr)
@@ -460,17 +443,19 @@ Loop:
 					// }
 					if s.clients.existsWithState(newClient.ipAddr, ClientState_Pending) {
 						s.clients.removeClient(newClient.ipAddr)
-						newClient.name = connState.ClientName
+						newClient.name = connState.clientName
 						newClient.state = ClientState_Connected
 						s.clients.addClient(newClient.name, newClient) // add the same client, but by name
 					} else {
 						panic("client has to be present in a map")
 					}
 
+					s.onlineClientsCount.Add(1)
+
 					// client, exists = s.clientsMap[newClient.ipAddr]
 					// if exists && client.State == ClientState_Pending {
 					// 	// Rehash the client based on its name rather than ip address
-					// 	newClient.Name = connState.ClientName
+					// 	newClient.Name = connState.clientName
 					// 	newClient.State = ClientState_Connected
 					// 	delete(s.clientsMap, newClient.ipAddr)
 					// 	s.clientsMap[newClient.Name] = newClient
@@ -482,29 +467,28 @@ Loop:
 					// TODO: This has to be renamed to connectedClientsCount (maybe we can only use one variable)
 					// s.connectedClientCount.Add(1)
 
+					// NOTE: This will force all test to fail.
 					// For greeting messages we can rely on client's name,
 					// because it happens after the client has been connected.
 					// Maybe we should print another menu here which allows the client to choose whether
 					// to display a chat history or to list all participants
-					// if s.connectedClientCount.Load() > 1 {
-					// 	msg := []byte(fmt.Sprintf("client: [%s] joined", connState.ClientName))
-					// 	s.greetingMessagesCh <- NewGreetingMsg(newClient, msg)
-					// 	s.listParticipants(newClient)
-					// 	if s.chatHistory.Size() != 0 {
-					// 		history := make([]string, s.chatHistory.Size())
-					// 		msgs := make([]ClientMessage, s.chatHistory.Size())
+					if s.onlineClientsCount.Load() > 1 {
+						msg := []byte(fmt.Sprintf("client: [%s] joined", connState.clientName))
+						s.greetingMessagesCh <- NewGreetingMsg(newClient, msg)
+						// s.listClients(newClient)
+						// if s.chatHistory.size() != 0 {
+						// 	history := make([]string, s.chatHistory.size())
+						// 	msgs := make([]ClientMessage, s.chatHistory.size())
+						// 	s.chatHistory.flush(msgs)
+						// 	for _, msg := range msgs {
+						// 		m, _ := msg.Format()
+						// 		history = append(history, string(m))
+						// 	}
+						// 	s.sessionMessagesCh <- NewSessionMsg(newClient, []byte(strings.Join(history, "\n")))
+						// }
+					}
 
-					// 		s.chatHistory.Flush(msgs)
-
-					// 		for _, msg := range msgs {
-					// 			m, _ := msg.Format()
-					// 			history = append(history, string(m))
-					// 		}
-					// 		s.sessionMessagesCh <- NewSessionMsg(newClient, []byte(strings.Join(history, "\n")))
-					// 	}
-					// }
-
-					log.Info().Msgf("new client [%s] was registered", connState.ClientName)
+					log.Info().Msgf("new client [%s] was registered", connState.clientName)
 
 					// TODO: This function should accept a client
 					go s.disconnectIfClientWasIdleForTooLong(conn, onIdleClientDisconnectedCh, abortDisconnectingClientCh, onClientErrorCh)
@@ -512,46 +496,47 @@ Loop:
 			}
 
 		case ConnState_AuthenticatingClient:
-			if connState.Substate == ConnSubstate_ReadingClientName {
+			if connState.substate == ConnSubstate_ReadingClientName {
 				if bytesRead > clientNameMaxLen {
 					msg := []byte(fmt.Sprintf("name cannot exceed %d characters", clientNameMaxLen))
 					s.sessionMessagesCh <- NewSessionMsg(newClient, msg)
 					s.sessionMessagesCh <- NewSessionMsg(newClient, clientNameMsg)
 				} else {
-					if !s.backend.HasClient(string(connState.Input)) {
-						msg := []byte(fmt.Sprintf("client with name [%s] doesn't exist", string(connState.Input)))
+					if !s.backend.HasClient(string(connState.input)) {
+						msg := []byte(fmt.Sprintf("client with name [%s] doesn't exist", string(connState.input)))
 						s.sessionMessagesCh <- NewSessionMsg(newClient, msg)
 						s.sessionMessagesCh <- NewSessionMsg(newClient, clientNameMsg)
 					} else {
-						connState.Transition(ConnState_AuthenticatingClient)
-						connState.ClientName = string(connState.Input)
+						connState.state = ConnState_AuthenticatingClient
+						connState.substate = ConnSubstate_ReadingClientPassword
+						connState.clientName = string(connState.input)
 					}
 				}
-			} else if connState.Substate == ConnSubstate_ReadingClientPassword {
+			} else if connState.substate == ConnSubstate_ReadingClientPassword {
 				if bytesRead > clientPasswordMaxLen {
 					msg := []byte(fmt.Sprintf("password cannot exceed %d characters", clientPasswordMaxLen))
 					s.sessionMessagesCh <- NewSessionMsg(newClient, msg)
 					s.sessionMessagesCh <- NewSessionMsg(newClient, clientPasswordMsg)
 				} else {
-					connState.ClientPassword = string(connState.Input)
+					connState.clientPassword = string(connState.input)
 
-					if !s.backend.MatchClientPassword(connState.ClientName, connState.ClientPassword) {
+					if !s.backend.MatchClientPassword(connState.clientName, connState.clientPassword) {
 						msg := []byte("password isn't correct, try again")
 						s.sessionMessagesCh <- NewSessionMsg(newClient, msg)
 						s.sessionMessagesCh <- NewSessionMsg(newClient, clientPasswordMsg)
 					} else {
-						connState.Substate = ConnSubstate_None
-						connState.State = ConnState_ProcessingClientMessages
-						connState.ClientPassword = string(connState.Input)
+						connState.substate = ConnSubstate_None
+						connState.state = ConnState_ProcessingClientMessages
+						connState.clientPassword = string(connState.input)
 
 						// mu.Lock()
-						if s.clients.existsWithState(connState.ClientName, ClientState_Disconnected) {
-							s.clients.removeClient(connState.ClientName)
+						if s.clients.existsWithState(connState.clientName, ClientState_Disconnected) {
+							s.clients.removeClient(connState.clientName)
 						}
 
-						// client, exists := s.clientsMap[connState.ClientName]
+						// client, exists := s.clientsMap[connState.clientName]
 						// if exists && client.State == ClientState_Disconnected {
-						// 	delete(s.clientsMap, connState.ClientName)
+						// 	delete(s.clientsMap, connState.clientName)
 						// } else {
 						// 	panic("client connected from a different machine")
 						// }
@@ -562,7 +547,7 @@ Loop:
 						if s.clients.existsWithState(newClient.ipAddr, ClientState_Pending) {
 							s.clients.removeClient(newClient.ipAddr)
 							newClient.state = ClientState_Connected
-							newClient.name = connState.ClientName
+							newClient.name = connState.clientName
 							s.clients.addClient(newClient.name, newClient)
 						} else {
 							panic("client has to exist with a Pending status")
@@ -572,7 +557,7 @@ Loop:
 						// if exists && client.State == ClientState_Pending {
 						// 	// Rehash new client
 						// 	newClient.State = ClientState_Connected
-						// 	newClient.Name = connState.ClientName
+						// 	newClient.Name = connState.clientName
 						// 	delete(s.clientsMap, newClient.ipAddr)
 						// 	s.clientsMap[newClient.Name] = newClient
 						// } else {
@@ -582,12 +567,12 @@ Loop:
 						// s.connectedClientCount.Add(1)
 
 						// if s.connectedClientCount.Load() > 1 {
-						// 	msg := []byte(fmt.Sprintf("client: [%s] joined", connState.ClientName))
+						// 	msg := []byte(fmt.Sprintf("client: [%s] joined", connState.clientName))
 						// 	s.greetingMessagesCh <- NewGreetingMsg(newClient, msg)
 						// 	// listClientsAndChatHistory()
 						// }
 
-						log.Info().Msgf("client [%s] was authenticated", connState.ClientName)
+						log.Info().Msgf("client [%s] was authenticated", connState.clientName)
 
 						// TODO: Rename to monitorIdleClient()
 						go s.disconnectIfClientWasIdleForTooLong(conn, onIdleClientDisconnectedCh, abortDisconnectingClientCh, onClientErrorCh)
@@ -650,7 +635,7 @@ func (s *Session) processMessages() {
 				log.Info().Msgf("received client's message: %s", string(msg.Contents))
 			}
 
-			s.chatHistory.Push(msg)
+			s.chatHistory.addMessage(msg)
 			s.stats.MessagesReceived.Add(1)
 
 			dropped, sent := s.clients.broadcastMessage(msg, []string{msg.SenderName}, []string{})

@@ -140,7 +140,7 @@ func (m *ClientsMap) broadcastMessage(msg Message, excludes []string, recipients
 
 func (m *ClientsMap) getClients() map[string]string {
 	var state string
-	var result map[string]string
+	result := make(map[string]string)
 
 	m.mu.Lock()
 	for _, client := range m.data {
