@@ -46,6 +46,8 @@ func createClient(t *testing.T,
 	assert.Equal(t, err, nil)
 	for {
 		buf := make([]byte, 1024)
+		// In order to make it more flexible, we can do multiple reads in a row,
+		// or we can
 		bRead, err := conn.Read(buf)
 		if err != nil || bRead == 0 {
 			return
