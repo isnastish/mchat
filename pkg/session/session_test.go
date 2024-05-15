@@ -47,7 +47,7 @@ func createClient(t *testing.T,
 	for {
 		buf := make([]byte, 1024)
 		// In order to make it more flexible, we can do multiple reads in a row,
-		// or we can
+		// or we can use a state machine thing.
 		bRead, err := conn.Read(buf)
 		if err != nil || bRead == 0 {
 			return

@@ -1,29 +1,32 @@
 package dbbackend
 
-import "time"
+type BackendType int32
 
 const (
-	BackendType_Mysql = iota + 1 // TODO(alx): Replace with DynamoDB
+	BackendType_DynamoDB = iota + 1
 	BackendType_Redis
 	BackendType_Memory
 )
 
-func BackendTypeStr(backendType int) string {
+func BackendTypeStr(backendType BackendType) string {
 	switch backendType {
-	case BackendType_Mysql:
-		return "mysql"
+	case BackendType_DynamoDB:
+		return "dynamodb"
 	case BackendType_Redis:
 		return "redis"
 	case BackendType_Memory:
 		return "memory"
 	default:
-		return "undefined"
+		return "unknown backend"
 	}
 }
 
 type DatabaseBackend interface {
-	HasClient(name string) bool
-	MatchClientPassword(name string, password string) bool
-	RegisterNewClient(name string, addr string, status string, password string, connTime time.Time) bool
-	AddMessage(name string, contents_ []byte, sentTime_ time.Time) bool
+	DoesClientExist(name string) bool
+	AuthClient(name string, passwordSha256 string) (bool, error)
+	RegisterClient(name string, passwordSha256 string, connTime string) error
+	RegisterMessage(senderName string, sentTime string, message []byte) error
+
+	// channel
+	// RegisterChannel
 }

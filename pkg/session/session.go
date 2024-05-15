@@ -4,69 +4,91 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/isnastish/chat/pkg/common"
 	lgr "github.com/isnastish/chat/pkg/logger"
-	bk "github.com/isnastish/chat/pkg/session/backend"
-	bk_memory "github.com/isnastish/chat/pkg/session/backend/memory"
-	bk_mysql "github.com/isnastish/chat/pkg/session/backend/mysql"
-	bk_redis "github.com/isnastish/chat/pkg/session/backend/redis"
+	backend "github.com/isnastish/chat/pkg/session/backend"
+	dynamodb_backend "github.com/isnastish/chat/pkg/session/backend/dynamodb"
+	memory_backend "github.com/isnastish/chat/pkg/session/backend/memory"
+	redis_backend "github.com/isnastish/chat/pkg/session/backend/redis"
+	messages "github.com/isnastish/chat/pkg/session/messages"
 	sts "github.com/isnastish/chat/pkg/stats"
 )
 
-// NOTE: If we failed to write to a connection, that's still alright.
-// the most important thing is that we don't have concurrent reads/writes to/from clientsMap
+// (initial state) -> (transitions to state)
+//
+// MenuOptionType_RegisterClient     -> ConnReaderState_RegisteringClient
+// MenuOptionType_AuthenticateClient -> ConnReaderState_AuthenticatingClient
+// MenuOptionType_ShutDownClient -> None
+// MenuOptionType_CreateChannel -> ConnReaderState_CreatingChannel
+//
+// ConnReaderState_RegisteringClient    -> ConnReaderSubstate_ReadingClientName
+//    ConnReaderSubstate_ReadingClientName -> ConnReaderSubstate_ReadingClientPassword
+// ConnReaderState_AuthenticatingClient -> ConnReaderSubstate_ReadingClientName
+//    ConnReaderSubstate_ReadingClientName -> ConnReaderSubstate_ReadingClientPassword
 
-// NOTE: Using a single mutex and locking it in multiple palces was a stupid idea,
-// which caused a deadlock (obviously).
-
-// fatal error: concurrent map read and map write
-// 20 Apr 24 14:33 CEST |INFO| registering new client [Mark Lutz]
-// fatal error: concurrent map iteration and map write
-
+// Unrelated to connection reader FSM
 const (
-	RegisterClientOption     = "1"
-	AuthenticateClientOption = "2"
-	ShutDownClient           = "3"
-	CreateNewChannel         = "4"
+	MenuOptionType_RegisterClient = iota + 1
+	MenuOptionType_AuthenticateClient
+	MenuOptionType_ShutDownClient
+	MenuOptionType_CreateChannel
 )
 
-const (
-	ConnState_ProcessingMenu = iota + 1
-	ConnState_RegisteringNewClient
-	ConnState_AuthenticatingClient
-	ConnState_ProcessingClientMessages
-	ConnState_CreatingChannel
-)
+type ConnReaderState int32
 
 const (
-	ConnSubstate_None = iota
-
-	// Substates for Registering/authenticating a client
-	ConnSubstate_ReadingClientName
-	ConnSubstate_ReadingClientPassword
-
-	//  Substates for creating a channel
-	ConnSubstate_ReadingChannelName
+	ConnReaderState_ProcessingMenu ConnReaderSubstate = iota + 1
+	ConnReaderState_RegisteringClient
+	ConnReaderState_AuthenticatingClient
+	ConnReaderState_ProcessingClientMessages
+	ConnReaderState_CreatingChannel
 )
 
-// TODO: More descriptive name
-type ConnState struct {
-	conn           net.Conn
-	state          int
-	substate       int
-	clientName     string
-	clientPassword string
-	input          []byte
+type ConnReaderSubstate int32
+
+const (
+	ConnReaderSubstate_ReadingClientName ConnReaderSubstate = iota + 1
+	ConnReaderSubstate_ReadingClientPassword
+)
+
+// TODO: Connection reader fsm should be autonomous,
+// meaning that it should manager the state on its own
+// and transition to a new state based on bytes read from the client.
+type ConnReaderFSM struct {
+	conn                           net.Conn
+	curState                       ConnReaderState
+	curSubstate                    ConnReaderSubstate
+	associatedClientName           string
+	associatedClientPasswordSha256 string
+	input                          []byte
 }
 
-type Settings struct {
-	NetworkProtocol string // tcp|udp
+func matchState(oldState, newState ConnReaderState) bool {
+	return oldState == newState
+}
+
+func mathSubstate(oldSubstate, newSubstate ConnReaderSubstate) bool {
+	return oldSubstate == newSubstate
+}
+
+func (r *ConnReaderFSM) transition(newState ConnReaderState, newSubstate ConnReaderSubstate) bool {
+	if matchState(r.curState, ConnReaderState_ProcessingMenu) {
+		if matchState(newState, ConnReaderState_RegisteringClient) ||
+			matchState(newState, ConnReaderState_AuthenticatingClient) {
+			// The substate could either transition to ReadingClientNam
+		}
+	}
+}
+
+type SessionSettings struct {
+	NetworkProtocol string
 	Addr            string
-	BackendType     int
+	BackendType     backend.BackendType
 }
 
 type Session struct {
@@ -80,15 +102,15 @@ type Session struct {
 	address            string
 	onSessionJoinCh    chan *Client
 	onSessionLeaveCh   chan string
-	clientMessagesCh   chan *ClientMessage
-	sessionMessagesCh  chan *SessionMessage
-	greetingMessagesCh chan *GreetingMessage
+	clientMessagesCh   chan *messages.ClientMessage
+	sessionMessagesCh  chan *messages.SessionMessage
+	greetingMessagesCh chan *messages.GreetingMessage
 	running            bool
 	quitCh             chan struct{}
 	stats              sts.Stats // atomic
 	// TODO: We need to protect the storage with a mutex.
 	// And we would have to protect clientsMap with a mutex as well.
-	backend     bk.DatabaseBackend
+	backend     backend.DatabaseBackend
 	chatHistory MessageHistory
 	// When a session starts, we should upload all the client names from our backend database
 	// into a runtimeDB, so we can operate on a map itself, rather than making queries to a database
@@ -102,8 +124,9 @@ type Session struct {
 const clientNameMaxLen = 64
 const clientPasswordMaxLen = 256
 
-var clientNameMsg = []byte("@name: ")
-var clientPasswordMsg = []byte("@password: ")
+var submitClientNamePrompt = []byte("@name: ")
+var submitClientPasswordPrompt = []byte("@password: ")
+
 var menu = []string{
 	"[1] - Register",
 	"[2] - Log in",
@@ -116,15 +139,15 @@ var menu = []string{
 }
 var log = lgr.NewLogger("debug")
 
-func NewSession(settings *Settings) *Session {
+func NewSession(settings *SessionSettings) *Session {
 	const timeout = 10000 * time.Millisecond
 
-	var dbBackend bk.DatabaseBackend
+	var backend obackend.DatabaseBackend
 	var err error
 
 	switch settings.BackendType {
-	case bk.BackendType_Redis:
-		dbBackend, err = bk_redis.NewRedisBackend(&bk_redis.RedisSettings{
+	case BackendType_Redis:
+		dbBackend, err = redis.NewRedisBackend(&bk_redis.RedisSettings{
 			Network:    "tcp",
 			Addr:       "127.0.0.1:6379",
 			Password:   "",
@@ -179,9 +202,9 @@ func NewSession(settings *Settings) *Session {
 		address:            settings.Addr,
 		onSessionJoinCh:    make(chan *Client),
 		onSessionLeaveCh:   make(chan string),
-		clientMessagesCh:   make(chan *ClientMessage),
-		sessionMessagesCh:  make(chan *SessionMessage),
-		greetingMessagesCh: make(chan *GreetingMessage),
+		clientMessagesCh:   make(chan *messages.ClientMessage),
+		sessionMessagesCh:  make(chan *messages.SessionMessage),
+		greetingMessagesCh: make(chan *messages.GreetingMessage),
 		quitCh:             make(chan struct{}),
 		timeoutCh:          make(chan struct{}),
 		backend:            dbBackend,
@@ -253,64 +276,41 @@ func (s *Session) disconnectIfClientWasIdleForTooLong(conn net.Conn, onIdleClien
 	}
 }
 
+func (s *Session) disconnectIdleClients() {
+
+}
+
 func (s *Session) handleConnection(conn net.Conn) {
 	defer func() {
-		// TODO: What happens if we try to close an already closed connection?
 		conn.Close()
 	}()
 
-	// mu := sync.Mutex{}
+	connReader := &ConnReader{
+		conn:  conn,
+		state: ConnReaderState(ConnReaderState_ProcessingMenu),
+	}
 
-	newClient := &Client{
+	client := &Client{
 		conn:     conn,
 		ipAddr:   conn.RemoteAddr().String(),
 		state:    ClientState_Pending,
 		joinTime: time.Now(),
 	}
 
+	// Update stats
 	s.connectionsCount.Add(1)
 
-	// mu.Lock()
-	s.clients.addClient(newClient.ipAddr, newClient)
-	// s.clientsMap[newClient.ipAddr] = newClient // This should be deleted if the client disconnects
-	// s.stats.ConnCount++
-	// mu.Unlock()
+	// Preemptively add client to the clients map
+	s.clients.addClient(client.ipAddr, client)
 
+	// A connection has been discovered, stop session's timeout
 	s.timer.Stop()
-
-	// TODO: Correctly update the stats
-
-	// log.Info().Msgf("[%15s] connection discovered", client.ipAddr)
-	// s.stats.ClientsJoined.Add(1)
-	// s.clients.Push(client.ipAddr, client)
-	// s.nClients.Add(1)
-	// s.timer.Stop()
-
-	// s.mu.Lock()
-	// if client.state.match(ClientState_Pending) {
-	// 	// Client left during Registration/ or connection process
-	// 	// So we have to remove it, since he didn't finish the registration
-	// 	delete(s.clients, client.ipAddr)
-	// } else if
-	// s.mu.Unlock()
-
-	// log.Info().Msgf("[%15s] left the session", addr)
-	// s.stats.ClientsLeft.Add(1)
-	// s.clients.UpdateStatus(addr, ClientStatus_Disconnected)
-	// s.nClients.Add(-1)
-	// // Reset the timer if all clients left the session.
-
-	connState := ConnState{
-		conn:     conn,
-		state:    ConnState_ProcessingMenu,
-		substate: ConnSubstate_None,
-	}
 
 	onIdleClientDisconnectedCh := make(chan struct{})
 	abortDisconnectingClientCh := make(chan struct{})
-	onClientErrorCh := make(chan struct{}) // client error
+	onClientErrorCh := make(chan struct{})
 
-	s.displayMenu(newClient)
+	s.displayMenu(client)
 
 	// listClientsAndChatHistory := func() {
 	// 	contents := []byte(fmt.Sprintf("client: [%s] joined", thisClient.name))
@@ -322,70 +322,64 @@ func (s *Session) handleConnection(conn net.Conn) {
 	// 	}
 	// }
 
+	readBuffer := make([]byte, 4096)
+
 Loop:
 	for {
-		buffer := make([]byte, 4096)
-		bytesRead, err := conn.Read(buffer)
-
-		// TODO: I would make sense to make it be a part of a connection reader
+		// TODO: This should be a part of a connection reader.
+		bytesRead, err := conn.Read(readBuffer)
 		if err != nil && err != io.EOF {
-			// If the client was idle for too long, it will be automatically disconnected from the session.
-			// Multiplexing is used to differentiate between an error, and us, who closed the connection intentionally.
 			select {
 			case <-onIdleClientDisconnectedCh:
-				// Notify the client that it will be disconnected
-				contents := []byte("you were idle for too long, disconnecting")
-				s.sessionMessagesCh <- NewSessionMsg(newClient, contents)
-				if s.loggingEnabled {
-					log.Info().Msgf("client: [%s]: has been idle for too long, disconnecting", newClient.ipAddr)
-				}
+				s.sessionMessagesCh <- messages.NewSessionMsg(
+					client,
+					[]byte("you were idle for too long, disconnecting"),
+				)
 			default:
-				if s.loggingEnabled {
-					log.Error().Msgf("failed to read bytes from the client: %s", err.Error())
-				}
 				close(onClientErrorCh)
 				break Loop
 			}
-			// return
 		}
 
-		// NOTE: This happens exaclty when the opposite side closes the connection.
+		// When the opposite side closed the connection.
 		if bytesRead == 0 {
-			if s.loggingEnabled {
-				log.Info().Msg("opposite side closed the connection")
-			}
-			close(onClientErrorCh) // unbock disconnectIdleClient function, so we don't have any leaks
+			close(onClientErrorCh)
 			break
 		}
 
-		connState.input = common.StripCR(buffer, bytesRead)
+		connReader.input = common.StripCR(readBuffer, bytesRead)
 
-		switch connState.state {
-		case ConnState_ProcessingMenu:
-			switch string(connState.input) {
-			case RegisterClientOption:
-				// TODO: Collapse into a function
-				connState.state = ConnState_RegisteringNewClient
-				connState.substate = ConnSubstate_ReadingClientName
-				s.sessionMessagesCh <- NewSessionMsg(newClient, clientNameMsg)
+		switch connReader.state {
+		case ConnReaderState(ConnReaderState_ProcessingMenu):
+			menuOption, err := strconv.Atoi(string(connReader.input))
+			if err != nil {
 
-			case AuthenticateClientOption:
-				connState.state = ConnState_AuthenticatingClient
-				connState.substate = ConnSubstate_ReadingClientName
-				s.sessionMessagesCh <- NewSessionMsg(newClient, clientNameMsg)
+			} else {
+				switch menuOption {
+				case MenuOptionType_RegisterClient:
+					connReader.transition(ConnReaderState_RegisteringClient)
+					// connReader.state = ConnReaderState(ConnReaderState_RegisteringClient)
+					// connReader.substate = ConnReaderSubstate_ReadingClientName
+					s.sessionMessagesCh <- messages.NewSessionMsg(client, submitClientNamePrompt)
 
-			case ShutDownClient:
-				s.sessionMessagesCh <- NewSessionMsg(newClient, []byte("Exiting..."))
-				break Loop
+				case MenuOptionType_AuthenticateClient:
+					connReader.state = ConnReaderState(ConnReaderState_AuthenticatingClient)
+					// connReader.substate = ConnSubstate_ReadingClientName
+					s.sessionMessagesCh <- NewSessionMsg(newClient, clientNameMsg)
 
-			case CreateNewChannel:
-				connState.state = ConnState_CreatingChannel
-				connState.substate = ConnSubstate_ReadingChannelName
+				case ShutDownClient:
+					s.sessionMessagesCh <- NewSessionMsg(newClient, []byte("Exiting..."))
+					break Loop
 
-			default:
-				msg := []byte(fmt.Sprintf("Command [%s] is undefined", connState.input))
-				s.sessionMessagesCh <- NewSessionMsg(newClient, msg)
-				s.displayMenu(newClient)
+				case CreateNewChannel:
+					connState.state = ConnState_CreatingChannel
+					connState.substate = ConnSubstate_ReadingChannelName
+
+				default:
+					msg := []byte(fmt.Sprintf("Command [%s] is undefined", connState.input))
+					s.sessionMessagesCh <- NewSessionMsg(newClient, msg)
+					s.displayMenu(newClient)
+				}
 			}
 
 		// TODO: Combine ConnState_RegisteringNewClient and ConnState_AuthenticatingClient in a single state
