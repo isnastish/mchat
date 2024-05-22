@@ -6,23 +6,24 @@ import (
 	"strconv"
 
 	"github.com/isnastish/chat/pkg/session"
-	bk "github.com/isnastish/chat/pkg/session/backend"
+	backend "github.com/isnastish/chat/pkg/session/backend"
 )
 
 func main() {
-	settings := session.Settings{}
+	config := session.SessionConfig{}
 
-	flag.StringVar(&settings.NetworkProtocol, "network", "tcp", "network protocol (tcp|udp)")
-	flag.StringVar(&settings.Addr, "address", ":5000", "address to listen in")
+	flag.StringVar(&config.Network, "network", "tcp", "network protocol (tcp|udp)")
+	flag.StringVar(&config.Addr, "address", ":5000", "address to listen in")
 
 	flag.Parse()
 
 	if dbBackend, exists := os.LookupEnv("DATABASE_BACKEND"); exists {
-		settings.BackendType, _ = strconv.Atoi(dbBackend)
+		backendType, _ := strconv.Atoi(dbBackend)
+		config.BackendType = backend.BackendType(backendType)
 	} else {
-		settings.BackendType = bk.BackendType_Memory
+		config.BackendType = backend.BackendTypeMemory
 	}
 
-	s := session.NewSession(&settings)
+	s := session.NewSession(config)
 	s.Run()
 }

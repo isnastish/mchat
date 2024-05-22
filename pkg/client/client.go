@@ -9,9 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/isnastish/chat/pkg/common"
 	lgr "github.com/isnastish/chat/pkg/logger"
-	sts "github.com/isnastish/chat/pkg/stats"
 )
 
 const retriesCount int32 = 5
@@ -30,8 +28,6 @@ type Client struct {
 
 	incommingCh chan Message
 	outgoingCh  chan Message
-
-	stats sts.Stats
 }
 
 var log = lgr.NewLogger("debug")
@@ -79,7 +75,6 @@ Loop:
 	for {
 		select {
 		case msg := <-c.incommingCh:
-			c.stats.MessagesReceived.Add(1)
 			msgStr := string(msg.data)
 			// TODO:
 			// Introduce a table of reserved commands. All commans should be prefixed with @ to distinguish between regular messages.
@@ -104,11 +99,11 @@ Loop:
 				}
 				bytesWritten += n
 			}
-			if bytesWritten == messageSize {
-				c.stats.MessagesSent.Add(1)
-			} else {
-				c.stats.MessagesDropped.Add(1)
-			}
+			// if bytesWritten == messageSize {
+			// 	c.stats.MessagesSent.Add(1)
+			// } else {
+			// 	c.stats.MessagesDropped.Add(1)
+			// }
 			// log.Info().Msgf("sent message: %s", string(msg.data))
 
 		case <-c.quitCh:
@@ -117,7 +112,6 @@ Loop:
 	}
 
 	c.remoteConn.Close()
-	sts.DisplayStats(&c.stats, sts.Client)
 }
 
 func (c *Client) recv() {
@@ -156,6 +150,6 @@ func (c *Client) send() {
 			break
 		}
 
-		c.outgoingCh <- Message{data: common.StripCR(buf, bytesRead)}
+		c.outgoingCh <- Message{data: []byte(strings.Trim(string(buf[:bytesRead]), " \\r\\n\\t\\f\\v"))}
 	}
 }

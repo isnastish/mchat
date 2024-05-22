@@ -2,10 +2,11 @@ package logger
 
 import (
 	"fmt"
-	"github.com/rs/zerolog"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 type Logger struct {
@@ -47,9 +48,7 @@ func NewLogger(logLevel string) Logger {
 	output.FormatLevel = func(l interface{}) string {
 		return strings.ToUpper(fmt.Sprintf("|%s|", l))
 	}
-	// output.FormatMessage = func(msg interface{}) string {
-	// 	return fmt.Sprintf("Msg: %v", msg)
-	// }
+
 	output.FormatFieldName = func(name interface{}) string {
 		return fmt.Sprintf("%s: ", name)
 	}

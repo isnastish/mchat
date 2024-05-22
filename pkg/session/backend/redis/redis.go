@@ -2,66 +2,61 @@ package redis
 
 import (
 	"context"
+	"sync"
+
+	backend "github.com/isnastish/chat/pkg/session/backend"
 	"github.com/redis/go-redis/v9"
-	"time"
-
-	lgr "github.com/isnastish/chat/pkg/logger"
 )
-
-type RedisSettings struct {
-	Network    string
-	Addr       string
-	Password   string
-	MaxRetries int
-}
 
 type RedisBackend struct {
 	client *redis.Client
 	ctx    context.Context
+	mu     sync.Mutex
 }
 
-var log = lgr.NewLogger("debug")
-
-func NewRedisBackend(settings *RedisSettings) (*RedisBackend, error) {
-	options := redis.Options{
-		Network:    settings.Network,
-		Addr:       settings.Addr,
-		Password:   settings.Password,
-		MaxRetries: settings.MaxRetries,
-		DB:         0,
-		OnConnect: func(ctx context.Context, cn *redis.Conn) error {
-			log.Info().Msg("Connection with redis server established")
-			return nil
-		},
-	}
-
-	client := redis.NewClient(&options)
-	ctx := context.Background()
-
-	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, err
-	}
-
-	rb := &RedisBackend{
-		client: client,
-		ctx:    ctx,
-	}
-
-	return rb, nil
+func NewBackend() *RedisBackend {
+	return &RedisBackend{}
 }
 
-func (b *RedisBackend) HasClient(name string) bool {
-	return true
+func (b *RedisBackend) HasParticipant(username string) bool {
+	return false
 }
 
-func (b *RedisBackend) MatchClientPassword(name string, password string) bool {
-	return true
+func (b *RedisBackend) RegisterParticipant(username string, passwordShaw256 string, emailAddress string) {
+
 }
 
-func (b *RedisBackend) RegisterNewClient(name string, addr string, status string, password string, connTime time.Time) bool {
-	return true
+func (b *RedisBackend) AuthenticateParticipant(username string, passwordSha256 string) bool {
+	return false
 }
 
-func (b *RedisBackend) AddMessage(name string, contents_ []byte, sentTime_ time.Time) bool {
-	return true
+func (b *RedisBackend) StoreMessage(senderName string, sentTime string, contents []byte, channelName ...string) {
+
+}
+
+func (b *RedisBackend) HasChannel(channelName string) bool {
+	return false
+}
+
+func (b *RedisBackend) RegisterChannel(channelName string, desc string, ownerName string) {
+}
+
+func (b *RedisBackend) DeleteChannel(channelName string) bool {
+	return false
+}
+
+func (b *RedisBackend) GetChatHistory(channelName ...string) []*backend.ParticipantMessage {
+	return nil
+}
+
+func (b *RedisBackend) GetChannelHistory(channelName string) {
+
+}
+
+func (b *RedisBackend) GetChannels() map[string]*backend.Channel {
+	return nil
+}
+
+func (b *RedisBackend) GetParticipantList() []*backend.Participant {
+	return nil
 }
