@@ -1,2 +1,2 @@
-## Multi-client chat in Go
-This is a cli chat application with a support for multiple backends (redis, dynamodb and in memory for local development) for storing the data. Participants have common functionality, communication with each other via the network, channel creation for exchanging messages and files. For more information please refer to the architecture document [architecture](architecture.md)
+## Multiclient chat
+This is a cli chat application written completely in Golang. Participants have common functionality, communication with each other via the network, an ability to create channels for sharing messages and files. The application supports multiple backends for storing the data (redis, dynamodb and in-memory for local development). Mode detailed explanation is provided in the architecture [architecture](architecture.md) document. Keep in mind that the project is still in development and requires more work in order to be considered as done.
