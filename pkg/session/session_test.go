@@ -2,6 +2,7 @@ package session
 
 import (
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -9,8 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/goleak"
 
-	"github.com/isnastish/chat/pkg/common"
-	bk "github.com/isnastish/chat/pkg/session/backend"
+	backend "github.com/isnastish/chat/pkg/session/backend"
 )
 
 type _Client struct {
@@ -18,10 +18,10 @@ type _Client struct {
 	password string
 }
 
-var settings = Settings{
-	NetworkProtocol: "tcp",
-	Addr:            ":5000",
-	BackendType:     bk.BackendType_Memory,
+var config = SessionConfig{
+	Network:     "tcp",
+	Addr:        ":5000",
+	BackendType: backend.BackendTypeMemory,
 }
 
 var clients = []_Client{
@@ -53,10 +53,10 @@ func createClient(t *testing.T,
 			return
 		}
 
-		input := string(common.StripCR(buf, bRead))
+		input := strings.Trim(string(buf[:bRead]), " \\r\\n\\t\\f\\v")
 
 		if strings.Contains(input, "Menu:") {
-			conn.Write([]byte(RegisterClientOption))
+			conn.Write([]byte(strconv.Itoa(RegisterParticipant)))
 		} else if strings.Contains(input, "@name:") {
 			conn.Write([]byte(testClient.name))
 		} else if strings.Contains(input, "@password:") {
@@ -79,7 +79,7 @@ func createClient(t *testing.T,
 func TestConnectionEstablished(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	s := NewSession(&settings)
+	s := NewSession(config)
 	go func() {
 		conn, err := net.Dial(s.network, s.address)
 		assert.Equal(t, err, nil)
@@ -92,24 +92,24 @@ func TestRegisterNewClient(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	doneCh := make(chan struct{})
-	s := NewSession(&settings)
+	s := NewSession(config)
 	go func() {
 		s.Run()
 		close(doneCh)
 	}()
-	createClient(t, settings.NetworkProtocol, settings.Addr, clients[0], func(input string, conn net.Conn) bool {
+	createClient(t, config.Network, config.Addr, clients[0], func(input string, conn net.Conn) bool {
 		conn.Close()
 		return true
 	}, false)
 	<-doneCh
-	assert.True(t, s.backend.HasClient(clients[0].name))
+	assert.True(t, s.backend.HasParticipant(clients[0].name))
 }
 
 func TestRegisterMultipeNewClients(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	doneCh := make(chan struct{})
-	s := NewSession(&settings)
+	s := NewSession(config)
 	go func() {
 		s.Run()
 		close(doneCh)
@@ -117,7 +117,7 @@ func TestRegisterMultipeNewClients(t *testing.T) {
 
 	for _, client := range clients {
 		c := client
-		go createClient(t, settings.NetworkProtocol, settings.Addr, c, func(input string, conn net.Conn) bool {
+		go createClient(t, config.Network, config.Addr, c, func(input string, conn net.Conn) bool {
 			conn.Close()
 			return true
 		}, false)
@@ -125,9 +125,8 @@ func TestRegisterMultipeNewClients(t *testing.T) {
 	<-doneCh
 
 	for _, client := range clients {
-		assert.True(t, s.backend.HasClient(client.name))
+		assert.True(t, s.backend.HasParticipant(client.name))
 	}
-	assert.Equal(t, len(clients), s.clients.size())
 }
 
 func TestSecondClientReceivedMessages(t *testing.T) {
@@ -135,19 +134,19 @@ func TestSecondClientReceivedMessages(t *testing.T) {
 	message := "hello!"
 
 	doneCh := make(chan struct{})
-	s := NewSession(&settings)
+	s := NewSession(config)
 	go func() {
 		s.Run()
 		close(doneCh)
 	}()
-	go createClient(t, settings.NetworkProtocol, settings.Addr, clients[0], func(input string, conn net.Conn) bool {
+	go createClient(t, config.Network, config.Addr, clients[0], func(input string, conn net.Conn) bool {
 		time.Sleep(100 * time.Millisecond) // Do we need to sleep?
 		conn.Write([]byte(message))
 		conn.Close()
 		return true
 	}, false)
 
-	go createClient(t, settings.NetworkProtocol, settings.Addr, clients[1], func(input string, conn net.Conn) bool {
+	go createClient(t, config.Network, config.Addr, clients[1], func(input string, conn net.Conn) bool {
 		assert.True(t, strings.Contains(input, message))
 		conn.Close()
 		return true

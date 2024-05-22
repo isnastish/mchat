@@ -2,69 +2,137 @@ package memory
 
 import (
 	"fmt"
+	"strings"
 	"sync"
+	"time"
+
+	backend "github.com/isnastish/chat/pkg/session/backend"
 )
 
-type SentMessage struct {
-	message  []byte
-	sentTime string
+type MemoryBackend struct {
+	participants       map[string]*backend.Participant
+	channels           map[string]*backend.Channel
+	generalChatHistory []*backend.ParticipantMessage
+	mu                 sync.Mutex
 }
 
-type ClientData struct {
-	name           string
-	passwordSha256 string
-	sentMessages   []SentMessage
-	connTime       string
-}
-
-type MemBackend struct {
-	storage map[string]*ClientData
-	mu      sync.Mutex
-}
-
-func NewClient(name string, passwordSha256 string, connTime string) *ClientData {
-	return &ClientData{
-		name:           name,
-		passwordSha256: passwordSha256,
-		connTime:       connTime,
-		sentMessages:   make([]SentMessage, 0),
+func NewBackend() *MemoryBackend {
+	return &MemoryBackend{
+		participants:       make(map[string]*backend.Participant),
+		channels:           make(map[string]*backend.Channel),
+		generalChatHistory: make([]*backend.ParticipantMessage, 0, 1024),
 	}
 }
 
-func NewMemBackend() *MemBackend {
-	return &MemBackend{
-		storage: make(map[string]*ClientData),
-	}
-}
-
-func (b *MemBackend) DoesClientExist(name string) bool {
+func (b *MemoryBackend) HasParticipant(username string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	_, exists := b.storage[name]
+	_, exists := b.participants[username]
 	return exists
 }
 
-func (b *MemBackend) RegisterClient(clientname string, passwordSha256 string, connTime string) error {
+func (b *MemoryBackend) RegisterParticipant(username string, passwordShaw256 string, emailAddress string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.DoesClientExist(clientname) {
-		return fmt.Errorf("client with name {%s} already registered", clientname)
+	if b.HasParticipant(username) {
+		b.participants[username] = &backend.Participant{
+			Name:           username,
+			PasswordSha256: passwordShaw256,
+			EmailAddress:   emailAddress,
+			JoinTime:       time.Now().Format(time.DateTime),
+		}
 	}
-	b.storage[clientname] = NewClient(clientname, passwordSha256, connTime)
-	return nil
 }
 
-func (b *MemBackend) RegisterMessage(clientname string, sentTime string, message []byte) error {
+func (b *MemoryBackend) AuthenticateParticipant(username string, passwordSha256 string) bool {
+	b.mu.Lock()
+	defer b.mu.Lock()
+	participant, exists := b.participants[username]
+	if exists {
+		return strings.EqualFold(participant.PasswordSha256, passwordSha256)
+	}
+	return false
+}
+
+func (b *MemoryBackend) StoreMessage(senderName string, sentTime string, contents []byte, channelName ...string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if !b.DoesClientExist(clientname) {
-		return fmt.Errorf("failed to register the message, client {%s} doesn't exist", clientname)
-	}
-	client := b.storage[clientname]
-	client.sentMessages = append(client.sentMessages, SentMessage{
-		message:  message,
-		sentTime: sentTime,
-	})
 
-	return nil
+	message := &backend.ParticipantMessage{
+		Sender:   senderName,
+		Time:     sentTime,
+		Contents: contents,
+	}
+
+	if len(channelName) > 0 {
+		channel, exists := b.channels[channelName[0]]
+		if !exists {
+			panic(fmt.Sprintf("cannot store a mesasge, channel {%s} doesn't exist", channelName[0]))
+		}
+		message.Channel = channelName[0]
+		channel.ChatHistory = append(channel.ChatHistory, message)
+	} else {
+		b.generalChatHistory = append(b.generalChatHistory, message)
+	}
+}
+
+func (b *MemoryBackend) HasChannel(channelName string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, exists := b.channels[channelName]
+	return exists
+}
+
+func (b *MemoryBackend) RegisterChannel(channelName string, desc string, ownerName string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.HasChannel(channelName) {
+		panic(fmt.Sprintf("channel {%s} already exists", channelName))
+	}
+	b.channels[channelName] = &backend.Channel{
+		Name:         channelName,
+		Desc:         desc,
+		CreationDate: time.Now().Format(time.DateTime),
+		ChatHistory:  make([]*backend.ParticipantMessage, 0, 1024),
+		Participants: make([]*backend.Participant, 0),
+	}
+}
+
+func (b *MemoryBackend) DeleteChannel(channelName string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.channels, channelName)
+	return b.HasChannel(channelName)
+}
+
+func (b *MemoryBackend) GetChatHistory(channelName ...string) []*backend.ParticipantMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if len(channelName) > 0 {
+		channel, exists := b.channels[channelName[0]]
+		if !exists {
+			panic(fmt.Sprintf("channel {%s} doesn't exist", channelName[0]))
+		}
+		return channel.ChatHistory
+	}
+	return b.generalChatHistory
+}
+
+func (b *MemoryBackend) GetChannels() map[string]*backend.Channel {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.channels
+}
+
+func (b *MemoryBackend) GetParticipantList() []*backend.Participant {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	participantList := make([]*backend.Participant, len(b.participants))
+	for _, participant := range b.participants {
+		participantList = append(participantList, participant)
+	}
+
+	return participantList
 }
