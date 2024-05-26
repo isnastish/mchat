@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -145,9 +144,8 @@ func (session *Session) handleConnection(conn net.Conn) {
 
 	for !reader.isState(Disconnecting) {
 		if reader.isState(ProcessingMenu) {
-			// Send a message containing menu options.
-			contents := []byte(strings.Join(menuOptionsTable, "\n\r"))
-			session.systemMessagesCh <- backend.MakeSystemMessage(contents, []string{connIpAddr})
+			menu := buildMenu(session)
+			session.systemMessagesCh <- backend.MakeSystemMessage([]byte(menu), []string{connIpAddr})
 		}
 
 		input := reader.read()
@@ -209,17 +207,17 @@ func (session *Session) handleConnection(conn net.Conn) {
 				} else {
 					reader.state = SelectingChannel
 
-					// TODO(alx): Move into a separate function
-					// Display all available channels to the participant
-					channels := session.storage.GetChannels()
-					channelsCount := len(channels)
-
-					builder := strings.Builder{}
-					builder.Grow(channelsCount*64 + 64)
-					builder.WriteString("Channels:\r\n")
-
-					for index, ch := range channels {
-						builder.WriteString(fmt.Sprintf("[%s] %s\r\n", index, ch.Name))
+					empty, channelList := buildChannelList(session)
+					if !empty {
+						session.systemMessagesCh <- backend.MakeSystemMessage(
+							[]byte(channelList),
+							receiver,
+						)
+					} else {
+						session.systemMessagesCh <- backend.MakeSystemMessage(
+							[]byte("no channels were created yet"),
+							receiver,
+						)
 					}
 				}
 
@@ -318,30 +316,24 @@ func (session *Session) handleConnection(conn net.Conn) {
 				if validationSucceeded {
 					reader.participantsPasswordSha256 = Sha256(input.asBytes)
 					if session.storage.HasParticipant(reader.participantsName) {
-						// TODO(alx): If a participant already exists in a connections map,
-						// he tried to connect from a different machine.
-						// if session.connections.hasParticipant(reader.participantsName) {
-						// 	panic("Connection from an unauthorized machine is not premited")
-						// }
-
 						reader.state = AcceptingMessages
 
-						chatHistory := make([]string, 0)
-						for _, message := range session.storage.GetChatHistory() {
-							formated := fmt.Sprintf(
-								"[%s:%s] %s",
-								message.Sender,
-								message.Time,
-								message.Contents,
+						empty, chatHistory := buildChatHistory(session)
+						if !empty {
+							session.systemMessagesCh <- backend.MakeSystemMessage(
+								[]byte(chatHistory),
+								receiver,
 							)
-							chatHistory = append(chatHistory, formated)
 						}
 
-						// send a message containing a chat history
-						session.systemMessagesCh <- backend.MakeSystemMessage(
-							[]byte(strings.Join(chatHistory, "\r\n")),
-							receiver,
-						)
+						empty, participantList := buildParticipantList(session)
+						if !empty {
+							session.systemMessagesCh <- backend.MakeSystemMessage(
+								[]byte(participantList),
+								receiver,
+							)
+						}
+
 					} else {
 						contents := []byte("authentication failed, name or password is incorrect")
 						session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
@@ -404,40 +396,37 @@ func (session *Session) handleConnection(conn net.Conn) {
 				}
 			}
 		} else if reader.isState(SelectingChannel) {
-			if channelsCount == 0 {
-				contents := []byte("no channels were created")
+			// TODO(alx): What if while we were in a process of selecting a channel,
+			// another channel has been created or deleted?
+			// The problem only arises when the owner has deleted a channel,
+			// with creating new onces the index will be incremented and won't affect our selection.
+			// Let's ignore the deletion process for now.
+
+			channels := session.storage.GetChannels()
+			channelsCount := len(channels)
+
+			index, err := strconv.Atoi(input.asStr)
+			if err != nil {
+				// Wrong index, print the list of channels once again.
+				contents := []byte(fmt.Sprintf("input {%s} doesn't match any channels", input.asStr))
 				session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
 			} else {
-				index, err := strconv.Atoi(input.asStr)
-				if err != nil {
-					// Couldn't convert the channel's index as a string representation to a number
-					contents := []byte(fmt.Sprintf("input {%s} doesn't match any channels", input.asStr))
-					session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
-
-					// List channels
-					reader.state = ListChannels
-				} else {
-					index = index % channelsCount
-					channels := session.storage.GetChannels()
-					ch := channels[index]
-					reader.curChannel = backend.Channel{
-						Name:         ch.Name,
-						Desc:         ch.Desc,
-						CreationDate: ch.CreationDate,
-					}
+				index = index % channelsCount
+				channels := session.storage.GetChannels()
+				ch := channels[index]
+				reader.curChannel = backend.Channel{
+					Name:         ch.Name,
+					Desc:         ch.Desc,
+					CreationDate: ch.CreationDate,
 				}
 			}
-
-			// TODO(alx): Select a channel only if channels are available.
-			// If not, suggest a user to create it.
-			panic("selecting channels is not implemented yet")
 		}
 	}
 
 	// If a participant was able to authenticate, sent a message to all
 	// other participants that it was disconnected.
 	if reader.wasAuthenticated {
-		contents := []byte(fmt.Sprintf("{%s} has disconnected", reader.participantsName))
+		contents := []byte(fmt.Sprintf("{%s} disconnected", reader.participantsName))
 		session.systemMessagesCh <- backend.MakeSystemMessage(contents, []string{})
 	}
 

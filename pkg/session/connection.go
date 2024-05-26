@@ -19,20 +19,12 @@ const (
 )
 
 var menuOptionsTable = []string{
-	// Register new participant.
-	"[0] Register",
-
-	// Authenticate an already registered participant.
-	"[1] Log in",
-
-	// Exit the sesssion.
-	"[2] Exit",
-
-	// Create a new channel.
-	"[3] Create channel",
-
-	// List all available channels.
-	"[4] List channels",
+	"Register",          // Register a new participant.
+	"Log in",            // Authenticate an already registered participant.
+	"Create channel",    // Create a new channel.
+	"Select channels",   // Select a channel for writing messages.
+	"List participants", // List all participants
+	"Exit",              // Exit the sesssion.
 }
 
 type ConnectionState int32
@@ -82,8 +74,11 @@ const (
 )
 
 type Connection struct {
-	conn        net.Conn
-	ipAddr      string
+	conn   net.Conn
+	ipAddr string
+
+	// TODO(alx): Document in the architecture.md file that a participant only
+	// present when the state is Connect.
 	state       ConnectionState
 	participant *backend.Participant
 }
@@ -133,6 +128,24 @@ func (connMap *ConnectionMap) assignParticipant(connIpAddr string, participant *
 
 	conn.participant = participant
 	conn.state = Connected // When a participant is inserted its state is set to Connected as a side-effect
+}
+
+func (connMap *ConnectionMap) isParticipantConnected(participantName string) bool {
+	connMap.mu.Lock()
+	defer connMap.mu.Unlock()
+
+	// not O(1) anymore since a connection map is a mapping from an ip address
+	// to a connection, but a participant's name is provided instead,
+	// so we cannot make a look up.
+	for _, conn := range connMap.connections {
+		if conn.isState(Connected) {
+			if conn.participant.Name == participantName {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 type Reader struct {
