@@ -1,8 +1,9 @@
 package session
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestValidatePassword(t *testing.T) {
@@ -42,21 +43,24 @@ func TestValidateName(t *testing.T) {
 
 func TestValidateEmailAddress(t *testing.T) {
 	// invalid names
-	assert.True(t, validateEmailAddress("John.Doe@example.com"))
+	assert.False(t, validateEmailAddress("John..Doe@example.com"))
+	assert.False(t, validateEmailAddress("abc.example.com"))
 
 	// valid names
-	// 	simple@example.com
-	// very.common@example.com
-	// FirstName.LastName@EasierReading.org (case is always ignored after the @ and usually before)
-	// x@example.com (one-letter local-part)
-	// long.email-address-with-hyphens@and.subdomains.example.com
-	// user.name+tag+sorting@example.com (may be routed to user.name@example.com inbox depending on mail server)
-	// name/surname@example.com (slashes are a printable character, and allowed)
-	// admin@example (local domain name with no TLD, although ICANN highly discourages dotless email addresses[29])
-	// example@s.example (see the List of Internet top-level domains)
-	// " "@example.org (space between the quotes)
+	assert.True(t, validateEmailAddress("John.Doe@example.com"))
+	assert.True(t, validateEmailAddress("simple@example.com"))
+	assert.True(t, validateEmailAddress("very.common@example.com"))
+	assert.True(t, validateEmailAddress("FirstName.LastName@EasierReading.org")) // case is always ignored after the @ and usually before
+	assert.True(t, validateEmailAddress("x@example.com"))                        // one-letter local-part
+	assert.True(t, validateEmailAddress("long.email-address-with-hyphens@and.subdomains.example.com"))
+	assert.True(t, validateEmailAddress("user.name+tag+sorting@example.com")) // may be routed to user.name@example.com inbox depending on mail server
+	assert.True(t, validateEmailAddress("name/surname@example.com"))          // slashes are a printable character, and allowed
+	assert.True(t, validateEmailAddress("admin@example"))                     // local domain name with no TLD, although ICANN highly discourages dotless email addresses[29]
+	assert.True(t, validateEmailAddress("example@s.example"))                 // see the List of Internet top-level domains
+	assert.True(t, validateEmailAddress("mailhost!username@example.org"))     // bangified host route used for uucp mailers
+
+	// "@example.org (space between the quotes)
 	// "john..doe"@example.org (quoted double dot)
-	// mailhost!username@example.org (bangified host route used for uucp mailers)
 	// "very.(),:;<>[]\".VERY.\"very@\\ \"very\".unusual"@strange.example.com (include non-letters character AND multiple at sign, the first one being double quoted)
 	// user%example.com@example.org (% escaped mail route to user@example.com via example.org)
 	// user-@example.org (local-part ending with non-alphanumeric character from the list of allowed printable characters)
