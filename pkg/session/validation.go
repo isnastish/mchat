@@ -11,11 +11,11 @@ func validatePassword(password string) bool {
 	// Password should contain at least 12 characters, but not exceed 32,
 	// at least one digit [0-9], one lower case letter [a-z], one upper case letter [A-Z],
 	// and one special character from a list: (@&$#%_)
-	re := regexp.MustCompile(`^[a-zA-Z0-9_@$#_:&%]{12,32}$`)
-	hasDigitsRe := regexp.MustCompile("([!^0-9])")
-	hasLowerRe := regexp.MustCompile("([!^a-z])")
-	hasUpperRe := regexp.MustCompile("([!^A-Z])")
-	hasSymbolsRe := regexp.MustCompile(`([!^@|%|$|#|&])`)
+	re := regexp.MustCompile(`^[a-zA-Z0-9_@$#:&%]{12,32}$`)
+	hasDigitsRe := regexp.MustCompile("[!^0-9]")
+	hasLowerRe := regexp.MustCompile("[!^a-z]")
+	hasUpperRe := regexp.MustCompile("[!^A-Z]")
+	hasSymbolsRe := regexp.MustCompile(`[!^@|%|$|#|&]`)
 
 	return re.MatchString(password) &&
 		hasDigitsRe.MatchString(password) &&
@@ -37,6 +37,8 @@ func validateName(name string) bool {
 }
 
 func validateEmailAddress(emailAddress string) bool {
+	// TODO(alx): Handle quoted email addresses.
+
 	// Reference: https: //en.wikipedia.org/wiki/Email_address
 	// Local-part
 	// The local-part of the email address may be unquoted or may be enclosed in quotation marks.
@@ -50,16 +52,18 @@ func validateEmailAddress(emailAddress string) bool {
 	}
 
 	localPart, domainPart, _ := strings.Cut(emailAddress, "@")
+
+	// dot cannot be the first or last character
+	if strings.HasPrefix(localPart, ".") ||
+		strings.HasSuffix(localPart, ".") {
+		return false
+	}
+
 	for idx, c := range localPart {
-		if c == '.' {
-			if (idx == 0) || (idx == len(localPart)-1) {
-				// dot cannot be the first or last character
+		if c == '.' && (idx < len(localPart)-1) {
+			// cannot have multiple .. consequtively
+			if localPart[idx+1] == '.' {
 				return false
-			} else if idx < (len(localPart) - 1) {
-				// dots cannot appear consecutively
-				if emailAddress[idx+1] == '.' {
-					return false
-				}
 			}
 		}
 	}
@@ -71,32 +75,31 @@ func validateEmailAddress(emailAddress string) bool {
 	// 2. Digits 0 to 9, provided that top-level domain names are not all-numeric;
 	// 3. Hyphen -, provided that it is not the first or last character.
 	// 4. This rule is known as the LDH rule (letters, digits, hyphen). In addition, the domain may be an IP address literal, surrounded by square brackets [], such as jsmith@[192.168.2.1] or jsmith@[IPv6:2001:db8::1], although this is rarely seen except in email spam. Internationalized domain names (which are encoded to comply with the requirements for a hostname) allow for presentation of non-ASCII domains. In mail systems compliant with RFC 6531 and RFC 6532 an email address may be encoded as UTF-8, both a local-part as well as a domain name.
-
 	// Comments are allowed in the domain as well as in the local-part; for example, john.smith@(comment)example.com and john.smith@example.com(comment) are equivalent to john.smith@example.com.
 
-	localPartRe := regexp.MustCompile("^([!#$%%&'*+\\-/=?^_`{|}~]|[0-9A-Za-z]){8,64}$")
+	localPartRe := regexp.MustCompile("^[0-9A-Za-z_.!#$\\%&'\\*\\+\\-/=\\?^`{\\|}~]{1,64}$")
 	if !localPartRe.MatchString(localPart) {
 		return false
 	}
 
-	for idx, c := range domainPart {
-		if c == '-' {
-			// Hyphen cannot be the first the last character in a domain
-			if (idx == 0) || (idx == len(domainPart)-1) {
-				return false
-			}
-		}
+	if strings.HasPrefix(domainPart, "-") ||
+		strings.HasSuffix(domainPart, "-") {
+		return false
 	}
 
-	// LDH rul (letters, digits, hyphen)
-	domainRe := regexp.MustCompile(`^[0-9A-Za-z\-]+$`)
+	// NOTE(alx): Only match addresses which doesn't contain ip?
+	// Then the regular expression would look like this:
+	// `^[\w\-]+$`
+	// And if we encounter '[]' symbols, we assume that it's an ip address.
+	domainRe := regexp.MustCompile(`^[0-9A-Za-z\-\[\]:.]+$`)
 	if !domainRe.MatchString(domainPart) {
 		return false
 	}
 
-	// labelRe := regexp.MustCompile(`^[\w-]{8,63}$`)
-	// excStartRe := regexp.MustCompile("!^-")
-	// excEndRe := regexp.MustCompile("!-$")
+	if strings.HasPrefix(domainPart, "[") &&
+		!strings.HasSuffix(domainPart, "]") {
+		return false
+	}
 
 	return true
 }
