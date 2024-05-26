@@ -94,7 +94,7 @@ type Backend interface {
 	// Authenticate an already registered participant.
 	// If username or password is incorrect, returns false.
 	// A participant can either be authenticated by a name or by its email address.
-	AuthenticateParticipant(username string, passwordSha256 string) bool
+	AuthParticipant(username string, passwordSha256 string) bool
 
 	// Store a message in a backend storage.
 	// If a message has a channel that it belongs to, it won't be displayed in a general chat history,

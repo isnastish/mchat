@@ -177,13 +177,13 @@ type Reader struct {
 
 	// TODO(alx): Replace string(s) with []byte arrays?
 
-	// Accumulated participant's data.
+	// Placeholders for participant's data.
 	participantsName           string
 	participantsPasswordSha256 string
 	participantsEmailAddress   string
 
-	// Set to true if a participant was auathenticated or registered.
-	wasAuthenticated bool
+	// Set to true if a participant was auathenticated or registered successfully.
+	isConnected bool
 
 	// Current channel selected by the user
 	// When a new channel is created, the user is automatically switched to that channel instead

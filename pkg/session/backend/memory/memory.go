@@ -44,7 +44,7 @@ func (b *MemoryBackend) RegisterParticipant(username string, passwordShaw256 str
 	}
 }
 
-func (b *MemoryBackend) AuthenticateParticipant(username string, passwordSha256 string) bool {
+func (b *MemoryBackend) AuthParticipant(username string, passwordSha256 string) bool {
 	b.mu.Lock()
 	defer b.mu.Lock()
 	participant, exists := b.participants[username]

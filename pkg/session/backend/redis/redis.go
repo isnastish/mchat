@@ -27,7 +27,7 @@ func (b *RedisBackend) RegisterParticipant(username string, passwordShaw256 stri
 
 }
 
-func (b *RedisBackend) AuthenticateParticipant(username string, passwordSha256 string) bool {
+func (b *RedisBackend) AuthParticipant(username string, passwordSha256 string) bool {
 	return false
 }
 

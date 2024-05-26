@@ -172,27 +172,38 @@ func (session *Session) handleConnection(conn net.Conn) {
 			option, _ := strconv.Atoi(input.asStr)
 			switch option {
 			case RegisterParticipant:
-				reader.state = RegisteringNewParticipant
-				reader.substate = ProcessingName
-
-				// send a system message to a participant asking for username
-				session.systemMessagesCh <- backend.MakeSystemMessage(usernameMessageContents, receiver)
+				if !reader.isConnected {
+					reader.state = RegisteringNewParticipant
+					reader.substate = ProcessingName
+					session.systemMessagesCh <- backend.MakeSystemMessage(usernameMessageContents, receiver)
+				} else {
+					session.systemMessagesCh <- backend.MakeSystemMessage(
+						[]byte("already registered"),
+						receiver,
+					)
+				}
 
 			case AuthenticateParticipant:
-				reader.state = AuthenticatingParticipant
-				reader.substate = ProcessingName
-
-				session.systemMessagesCh <- backend.MakeSystemMessage(usernameMessageContents, receiver)
+				if !reader.isConnected {
+					reader.state = AuthenticatingParticipant
+					reader.substate = ProcessingName
+					session.systemMessagesCh <- backend.MakeSystemMessage(usernameMessageContents, receiver)
+				} else {
+					session.systemMessagesCh <- backend.MakeSystemMessage(
+						[]byte("already authenticated"),
+						receiver,
+					)
+				}
 
 			case CreateChannel:
-				if !reader.wasAuthenticated {
-					contents := []byte("cannot create a channel, authentication is required")
-					session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
+				if !reader.isConnected {
+					session.systemMessagesCh <- backend.MakeSystemMessage(
+						[]byte("cannot create a channel, authentication is required"),
+						receiver,
+					)
 				} else {
 					reader.state = CreatingNewChannel
 					reader.substate = ProcessingName
-
-					// send a message asking to enter channel's name
 					session.systemMessagesCh <- backend.MakeSystemMessage(
 						channelsNameMessageContents,
 						receiver,
@@ -200,12 +211,13 @@ func (session *Session) handleConnection(conn net.Conn) {
 				}
 
 			case SelectChannel:
-				if !reader.wasAuthenticated {
-					contents := []byte("cannot select a channel, authentication is required")
-					session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
+				if !reader.isConnected {
+					session.systemMessagesCh <- backend.MakeSystemMessage(
+						[]byte("cannot select a channel, authentication is required"),
+						receiver,
+					)
 				} else {
 					reader.state = SelectingChannel
-
 					empty, channelList := buildChannelList(session)
 					if !empty {
 						session.systemMessagesCh <- backend.MakeSystemMessage(
@@ -235,34 +247,41 @@ func (session *Session) handleConnection(conn net.Conn) {
 			if reader.isSubstate(ProcessingName) {
 				reader.substate = ProcessingParticipantsEmailAddress
 				reader.participantsName = input.asStr
-
 				session.systemMessagesCh <- backend.MakeSystemMessage(emailAddressMessageContents, receiver)
-
 			} else if reader.isSubstate(ProcessingParticipantsEmailAddress) {
 				reader.substate = ProcessingParticipantsPassword
 				reader.participantsEmailAddress = input.asStr
-
 				session.systemMessagesCh <- backend.MakeSystemMessage(passwordMessageContents, receiver)
-
 			} else if reader.isSubstate(ProcessingParticipantsPassword) {
 				reader.participantsPasswordSha256 = Sha256(input.asBytes)
-				// TODO(alx): Should we do the input validation at the end,
-				// or on each state, after entering the name, after entering the password,
-				// and an email address?
 
-				if !validateUsername(reader.participantsName) {
-					reader.substate = ProcessingName
+				validationSucceeded := false
+				if validateName(reader.participantsName) {
+					if validateEmailAddress(reader.participantsEmailAddress) {
+						// Password validation should be done on the raw data rather than on a sha256
+						if validatePassword(input.asStr) {
+							validationSucceeded = true
+						} else {
+							session.systemMessagesCh <- backend.MakeSystemMessage(
+								[]byte("password validation failed"),
+								receiver,
+							)
+						}
+					} else {
+						session.systemMessagesCh <- backend.MakeSystemMessage(
+							[]byte("email address validation failed"),
+							receiver,
+						)
+					}
+				} else {
+					session.systemMessagesCh <- backend.MakeSystemMessage(
+						[]byte("name validation failed"),
+						receiver,
+					)
 				}
 
-				// if !validateEmailAddress(reader.participantsEmailAddress) {
-				// 	reader.substate = ProcessingParticipantsEmailAddress
-				// }
-				// if !validateEmailAddress(reader.participantsPasswordSha256) {
-				// 	reader.substate = ProcessingParticipantsPassword
-				// }
-
-				if !session.storage.HasParticipant(reader.participantsName) {
-					// TODO(alx): Do we need to speciy all the fields when assigning a participan?
+				if validationSucceeded &&
+					!session.storage.HasParticipant(reader.participantsName) {
 					session.connections.assignParticipant(
 						connIpAddr,
 						&backend.Participant{
@@ -277,66 +296,67 @@ func (session *Session) handleConnection(conn net.Conn) {
 						reader.participantsEmailAddress,
 					)
 				} else {
-					contents := []byte(fmt.Sprintf("participant {%s} already exists", reader.participantsName))
-					session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
-
 					reader.state = ProcessingMenu
 					reader.substate = NotSet
+					session.systemMessagesCh <- backend.MakeSystemMessage(
+						[]byte(fmt.Sprintf("participant {%s} already exists", reader.participantsName)),
+						receiver,
+					)
 				}
 			}
 		} else if reader.isState(AuthenticatingParticipant) {
 			if reader.isSubstate(ProcessingName) {
 				reader.substate = ProcessingParticipantsPassword
 				reader.participantsName = input.asStr
-
-				// send a message to a participant requesting to enter its password
 				session.systemMessagesCh <- backend.MakeSystemMessage(
 					passwordMessageContents,
 					receiver,
 				)
 
 			} else if reader.isSubstate(ProcessingParticipantsPassword) {
-				reader.participantsPasswordSha256 = Sha256(input.asBytes)
-
 				validationSucceeded := true
-				if !validateUsername(reader.participantsName) {
-					// TODO(alx): More descriptive error message.
-					contents := []byte(fmt.Sprintf("failed to validate the name {%s}", reader.participantsName))
-					session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
-					validationSucceeded = false
-				}
-
-				if !validatePassword(reader.participantsPasswordSha256) {
-					contents := []byte(fmt.Sprintf("failed to validate the password {%s}", reader.participantsPasswordSha256))
-					session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
-					validationSucceeded = false
-				}
-
-				if validationSucceeded {
-					reader.participantsPasswordSha256 = Sha256(input.asBytes)
-					if session.storage.HasParticipant(reader.participantsName) {
-						reader.state = AcceptingMessages
-
-						empty, chatHistory := buildChatHistory(session)
-						if !empty {
-							session.systemMessagesCh <- backend.MakeSystemMessage(
-								[]byte(chatHistory),
-								receiver,
-							)
-						}
-
-						empty, participantList := buildParticipantList(session)
-						if !empty {
-							session.systemMessagesCh <- backend.MakeSystemMessage(
-								[]byte(participantList),
-								receiver,
-							)
-						}
-
+				if validateName(reader.participantsName) {
+					if validatePassword(input.asStr) {
+						validationSucceeded = true
 					} else {
-						contents := []byte("authentication failed, name or password is incorrect")
-						session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
+						session.systemMessagesCh <- backend.MakeSystemMessage(
+							[]byte("password validation failed"),
+							receiver,
+						)
 					}
+				} else {
+					session.systemMessagesCh <- backend.MakeSystemMessage(
+						[]byte("name validation failed"),
+						receiver,
+					)
+				}
+
+				reader.participantsPasswordSha256 = Sha256(input.asBytes)
+				if validationSucceeded &&
+					session.storage.AuthParticipant(reader.participantsName, reader.participantsPasswordSha256) {
+					reader.state = AcceptingMessages
+
+					empty, chatHistory := buildChatHistory(session)
+					if !empty {
+						session.systemMessagesCh <- backend.MakeSystemMessage(
+							[]byte(chatHistory),
+							receiver,
+						)
+					}
+
+					empty, participantList := buildParticipantList(session)
+					if !empty {
+						session.systemMessagesCh <- backend.MakeSystemMessage(
+							[]byte(participantList),
+							receiver,
+						)
+					}
+				} else {
+					reader.substate = NotSet
+					session.systemMessagesCh <- backend.MakeSystemMessage(
+						[]byte("authentication failed, name or password is incorrect"),
+						receiver,
+					)
 				}
 			}
 		} else if reader.isState(AcceptingMessages) {
@@ -400,31 +420,48 @@ func (session *Session) handleConnection(conn net.Conn) {
 			// The problem only arises when the owner has deleted a channel,
 			// with creating new onces the index will be incremented and won't affect our selection.
 			// Let's ignore the deletion process for now.
-
-			channels := session.storage.GetChannels()
-			channelsCount := len(channels)
-
 			index, err := strconv.Atoi(input.asStr)
 			if err != nil {
-				// Wrong index, print the list of channels once again.
-				contents := []byte(fmt.Sprintf("input {%s} doesn't match any channels", input.asStr))
-				session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
+				_, channelList := buildChannelList(session)
+				session.systemMessagesCh <- backend.MakeSystemMessage(
+					[]byte(fmt.Sprintf("input {%s} doesn't match any channels", input.asStr)),
+					receiver,
+				)
+				session.systemMessagesCh <- backend.MakeSystemMessage(
+					[]byte(channelList),
+					receiver,
+				)
 			} else {
-				index = index % channelsCount
 				channels := session.storage.GetChannels()
-				ch := channels[index]
-				reader.curChannel = backend.Channel{
-					Name:         ch.Name,
-					Desc:         ch.Desc,
-					CreationDate: ch.CreationDate,
+				channelsCount := len(channels)
+				if index < channelsCount || index >= channelsCount {
+
+				} else {
+					ch := channels[index]
+					reader.curChannel = backend.Channel{
+						Name:         ch.Name,
+						Desc:         ch.Desc,
+						CreationDate: ch.CreationDate,
+					}
+
+					reader.channelIsSet = true
+
+					// Sent a message to the participant containing the chat history in this channel.
+					empty, chatHistory := buildChatHistory(session, ch.Name)
+					if !empty {
+						session.systemMessagesCh <- backend.MakeSystemMessage(
+							[]byte(chatHistory),
+							receiver,
+						)
+					}
 				}
 			}
 		}
 	}
 
-	// If a participant was able to authenticate, sent a message to all
+	// If a participant was able to connect, sent a message to all
 	// other participants that it was disconnected.
-	if reader.wasAuthenticated {
+	if reader.isConnected {
 		contents := []byte(fmt.Sprintf("{%s} disconnected", reader.participantsName))
 		session.systemMessagesCh <- backend.MakeSystemMessage(contents, []string{})
 	}

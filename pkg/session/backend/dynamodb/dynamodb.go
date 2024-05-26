@@ -27,7 +27,7 @@ func (b *DynamoDBBackend) RegisterParticipant(username string, passwordShaw256 s
 
 }
 
-func (b *DynamoDBBackend) AuthenticateParticipant(username string, passwordSha256 string) bool {
+func (b *DynamoDBBackend) AuthParticipant(username string, passwordSha256 string) bool {
 	return false
 }
 

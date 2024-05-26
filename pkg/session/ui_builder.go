@@ -37,8 +37,8 @@ func buildChannelList(session *Session) (bool, string) {
 	return true, builder.String()
 }
 
-func buildChatHistory(session *Session) (bool, string) {
-	chatHistory := session.storage.GetChatHistory()
+func buildChatHistory(session *Session, channel ...string) (bool, string) {
+	chatHistory := session.storage.GetChatHistory(channel...)
 	chatLen := len(chatHistory)
 
 	if chatLen == 0 {
