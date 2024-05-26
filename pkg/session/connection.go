@@ -14,7 +14,7 @@ const (
 	RegisterParticipant     = 0x01
 	AuthenticateParticipant = 0x02
 	CreateChannel           = 0x03
-	ListChannels            = 0x04
+	SelectChannel           = 0x04
 	Exit                    = 0x05
 )
 
@@ -47,17 +47,28 @@ var connectionStateTable = []string{
 	"online",
 }
 
+var usernameMessageContents = []byte("username: ")
+var passwordMessageContents = []byte("password: ")
+var emailAddressMessageContents = []byte("email address: ")
+var channelsNameMessageContents = []byte("channel's name: ")
+var channelsDescMessageContents = []byte("channel's desc: ")
+
 type ReaderState int32
 type ReaderSubstate int32
 
+// TODO(alx): Combine listing channels and selecting channels all together.
+// SelectChannels will list all available channels and wait for the input.
 const (
 	ProcessingMenu            ReaderState = 0x01
 	RegisteringNewParticipant ReaderState = 0x02
 	AuthenticatingParticipant ReaderState = 0x03
 	AcceptingMessages         ReaderState = 0x04
 	CreatingNewChannel        ReaderState = 0x05
-	SelectingChannel          ReaderState = 0x06
-	Disconnecting             ReaderState = 0x07
+	// This state should list all available channels
+	// and wait for input from the participant.
+	SelectingChannel ReaderState = 0x06
+
+	Disconnecting ReaderState = 0x07
 )
 
 // TODO(alx): You bitwise operations as an optimization
@@ -102,6 +113,13 @@ func (connMap *ConnectionMap) removeConn(connIpAddr string) {
 	connMap.mu.Lock()
 	delete(connMap.connections, connIpAddr)
 	connMap.mu.Unlock()
+}
+
+// Return the amount of connected participants
+func (connMap *ConnectionMap) count() int {
+	connMap.mu.Lock()
+	defer connMap.mu.Unlock()
+	return len(connMap.connections)
 }
 
 func (connMap *ConnectionMap) assignParticipant(connIpAddr string, participant *backend.Participant) {
@@ -154,14 +172,10 @@ type Reader struct {
 	// Set to true if a participant was auathenticated or registered.
 	wasAuthenticated bool
 
-	// TODO(alx): Add an ability to create more than one channel.
-	// Accumulate data about a channel
-	channelName string
-	channelDesc string
-
-	// If channel is selected,
-	// all messages are sent there, instead of a general chat.
-	channelSelected bool
+	// Current channel selected by the user
+	// When a new channel is created, the user is automatically switched to that channel instead
+	curChannel   backend.Channel
+	channelIsSet bool
 }
 
 func newReader(conn net.Conn, connIpAddr string, connectionTimeout time.Duration) *Reader {

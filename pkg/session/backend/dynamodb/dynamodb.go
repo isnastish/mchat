@@ -54,7 +54,7 @@ func (b *DynamoDBBackend) GetChannelHistory(channelName string) {
 
 }
 
-func (b *DynamoDBBackend) GetChannels() map[string]*backend.Channel {
+func (b *DynamoDBBackend) GetChannels() []*backend.Channel {
 	return nil
 }
 

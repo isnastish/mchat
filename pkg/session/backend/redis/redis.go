@@ -15,6 +15,7 @@ type RedisBackend struct {
 }
 
 func NewBackend() *RedisBackend {
+
 	return &RedisBackend{}
 }
 
@@ -53,7 +54,7 @@ func (b *RedisBackend) GetChannelHistory(channelName string) {
 
 }
 
-func (b *RedisBackend) GetChannels() map[string]*backend.Channel {
+func (b *RedisBackend) GetChannels() []*backend.Channel {
 	return nil
 }
 
