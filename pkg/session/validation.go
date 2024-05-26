@@ -74,7 +74,7 @@ func validateEmailAddress(emailAddress string) bool {
 
 	// Comments are allowed in the domain as well as in the local-part; for example, john.smith@(comment)example.com and john.smith@example.com(comment) are equivalent to john.smith@example.com.
 
-	localPartRe := regexp.MustCompile("^([!#$%%&'*+-/=?^_`{|}~]|[0-9A-Za-z]{8,64})$")
+	localPartRe := regexp.MustCompile("^([!#$%%&'*+\\-/=?^_`{|}~]|[0-9A-Za-z]){8,64}$")
 	if !localPartRe.MatchString(localPart) {
 		return false
 	}
@@ -89,10 +89,14 @@ func validateEmailAddress(emailAddress string) bool {
 	}
 
 	// LDH rul (letters, digits, hyphen)
-	domainRe := regexp.MustCompile(`^[\w-:.]$`)
+	domainRe := regexp.MustCompile(`^[0-9A-Za-z\-]+$`)
+	if !domainRe.MatchString(domainPart) {
+		return false
+	}
+
 	// labelRe := regexp.MustCompile(`^[\w-]{8,63}$`)
 	// excStartRe := regexp.MustCompile("!^-")
 	// excEndRe := regexp.MustCompile("!-$")
 
-	return domainRe.MatchString(domainPart)
+	return true
 }

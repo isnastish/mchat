@@ -42,7 +42,7 @@ func TestValidateName(t *testing.T) {
 
 func TestValidateEmailAddress(t *testing.T) {
 	// invalid names
-	// John..Doe@example.com
+	assert.True(t, validateEmailAddress("John.Doe@example.com"))
 
 	// valid names
 	// 	simple@example.com
