@@ -15,6 +15,7 @@ type RedisBackend struct {
 }
 
 func NewBackend() *RedisBackend {
+
 	return &RedisBackend{}
 }
 
@@ -26,7 +27,7 @@ func (b *RedisBackend) RegisterParticipant(username string, passwordShaw256 stri
 
 }
 
-func (b *RedisBackend) AuthenticateParticipant(username string, passwordSha256 string) bool {
+func (b *RedisBackend) AuthParticipant(username string, passwordSha256 string) bool {
 	return false
 }
 
@@ -53,7 +54,7 @@ func (b *RedisBackend) GetChannelHistory(channelName string) {
 
 }
 
-func (b *RedisBackend) GetChannels() map[string]*backend.Channel {
+func (b *RedisBackend) GetChannels() []*backend.Channel {
 	return nil
 }
 

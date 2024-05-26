@@ -14,25 +14,17 @@ const (
 	RegisterParticipant     = 0x01
 	AuthenticateParticipant = 0x02
 	CreateChannel           = 0x03
-	ListChannels            = 0x04
+	SelectChannel           = 0x04
 	Exit                    = 0x05
 )
 
 var menuOptionsTable = []string{
-	// Register new participant.
-	"[0] Register",
-
-	// Authenticate an already registered participant.
-	"[1] Log in",
-
-	// Exit the sesssion.
-	"[2] Exit",
-
-	// Create a new channel.
-	"[3] Create channel",
-
-	// List all available channels.
-	"[4] List channels",
+	"Register",          // Register a new participant.
+	"Log in",            // Authenticate an already registered participant.
+	"Create channel",    // Create a new channel.
+	"Select channels",   // Select a channel for writing messages.
+	"List participants", // List all participants
+	"Exit",              // Exit the sesssion.
 }
 
 type ConnectionState int32
@@ -47,17 +39,28 @@ var connectionStateTable = []string{
 	"online",
 }
 
+var usernameMessageContents = []byte("username: ")
+var passwordMessageContents = []byte("password: ")
+var emailAddressMessageContents = []byte("email address: ")
+var channelsNameMessageContents = []byte("channel's name: ")
+var channelsDescMessageContents = []byte("channel's desc: ")
+
 type ReaderState int32
 type ReaderSubstate int32
 
+// TODO(alx): Combine listing channels and selecting channels all together.
+// SelectChannels will list all available channels and wait for the input.
 const (
 	ProcessingMenu            ReaderState = 0x01
 	RegisteringNewParticipant ReaderState = 0x02
 	AuthenticatingParticipant ReaderState = 0x03
 	AcceptingMessages         ReaderState = 0x04
 	CreatingNewChannel        ReaderState = 0x05
-	SelectingChannel          ReaderState = 0x06
-	Disconnecting             ReaderState = 0x07
+	// This state should list all available channels
+	// and wait for input from the participant.
+	SelectingChannel ReaderState = 0x06
+
+	Disconnecting ReaderState = 0x07
 )
 
 // TODO(alx): You bitwise operations as an optimization
@@ -71,8 +74,11 @@ const (
 )
 
 type Connection struct {
-	conn        net.Conn
-	ipAddr      string
+	conn   net.Conn
+	ipAddr string
+
+	// TODO(alx): Document in the architecture.md file that a participant only
+	// present when the state is Connect.
 	state       ConnectionState
 	participant *backend.Participant
 }
@@ -104,6 +110,13 @@ func (connMap *ConnectionMap) removeConn(connIpAddr string) {
 	connMap.mu.Unlock()
 }
 
+// Return the amount of connected participants
+func (connMap *ConnectionMap) count() int {
+	connMap.mu.Lock()
+	defer connMap.mu.Unlock()
+	return len(connMap.connections)
+}
+
 func (connMap *ConnectionMap) assignParticipant(connIpAddr string, participant *backend.Participant) {
 	connMap.mu.Lock()
 	defer connMap.mu.Unlock()
@@ -115,6 +128,24 @@ func (connMap *ConnectionMap) assignParticipant(connIpAddr string, participant *
 
 	conn.participant = participant
 	conn.state = Connected // When a participant is inserted its state is set to Connected as a side-effect
+}
+
+func (connMap *ConnectionMap) isParticipantConnected(participantName string) bool {
+	connMap.mu.Lock()
+	defer connMap.mu.Unlock()
+
+	// not O(1) anymore since a connection map is a mapping from an ip address
+	// to a connection, but a participant's name is provided instead,
+	// so we cannot make a look up.
+	for _, conn := range connMap.connections {
+		if conn.isState(Connected) {
+			if conn.participant.Name == participantName {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 type Reader struct {
@@ -146,22 +177,18 @@ type Reader struct {
 
 	// TODO(alx): Replace string(s) with []byte arrays?
 
-	// Accumulated participant's data.
+	// Placeholders for participant's data.
 	participantsName           string
 	participantsPasswordSha256 string
 	participantsEmailAddress   string
 
-	// Set to true if a participant was auathenticated or registered.
-	wasAuthenticated bool
+	// Set to true if a participant was auathenticated or registered successfully.
+	isConnected bool
 
-	// TODO(alx): Add an ability to create more than one channel.
-	// Accumulate data about a channel
-	channelName string
-	channelDesc string
-
-	// If channel is selected,
-	// all messages are sent there, instead of a general chat.
-	channelSelected bool
+	// Current channel selected by the user
+	// When a new channel is created, the user is automatically switched to that channel instead
+	curChannel   backend.Channel
+	channelIsSet bool
 }
 
 func newReader(conn net.Conn, connIpAddr string, connectionTimeout time.Duration) *Reader {

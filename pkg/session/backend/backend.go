@@ -80,6 +80,8 @@ type Channel struct {
 	Participants []*Participant
 }
 
+// NOTE(alx): All of these function has to be replaced with RPS(s)
+// and the backend should be implemented as a separate service.
 type Backend interface {
 	// Check whether a participant with a given name exists.
 	// Returns true if does, false otherwise.
@@ -92,7 +94,7 @@ type Backend interface {
 	// Authenticate an already registered participant.
 	// If username or password is incorrect, returns false.
 	// A participant can either be authenticated by a name or by its email address.
-	AuthenticateParticipant(username string, passwordSha256 string) bool
+	AuthParticipant(username string, passwordSha256 string) bool
 
 	// Store a message in a backend storage.
 	// If a message has a channel that it belongs to, it won't be displayed in a general chat history,
@@ -117,7 +119,7 @@ type Backend interface {
 	GetChatHistory(channelName ...string) []*ParticipantMessage
 
 	// Returns all created channels.
-	GetChannels() map[string]*Channel
+	GetChannels() []*Channel
 
 	// Return a list of all participants
 	GetParticipantList() []*Participant

@@ -44,7 +44,7 @@ func (b *MemoryBackend) RegisterParticipant(username string, passwordShaw256 str
 	}
 }
 
-func (b *MemoryBackend) AuthenticateParticipant(username string, passwordSha256 string) bool {
+func (b *MemoryBackend) AuthParticipant(username string, passwordSha256 string) bool {
 	b.mu.Lock()
 	defer b.mu.Lock()
 	participant, exists := b.participants[username]
@@ -119,10 +119,14 @@ func (b *MemoryBackend) GetChatHistory(channelName ...string) []*backend.Partici
 	return b.generalChatHistory
 }
 
-func (b *MemoryBackend) GetChannels() map[string]*backend.Channel {
+func (b *MemoryBackend) GetChannels() []*backend.Channel {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.channels
+	channels := make([]*backend.Channel, len(b.channels))
+	for _, ch := range b.channels {
+		channels = append(channels, ch)
+	}
+	return channels
 }
 
 func (b *MemoryBackend) GetParticipantList() []*backend.Participant {
