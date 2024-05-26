@@ -1,16 +1,24 @@
 package session
 
-import "regexp"
-
-// https://github.com/google/re2/wiki/Syntax
-
-var participantsNameRegexp = regexp.MustCompile("p([a-zA-z0-9_]+)")
-var participantsPasswordRegexp = regexp.MustCompile("p()")
+import (
+	"regexp"
+)
 
 func validatePassword(password string) bool {
-	length := len(password)
-	return ((length >= 10) && (length <= 256)) &&
-		participantsNameRegexp.MatchString(password)
+	// Password should contain at least 12 characters,
+	// at least one digit [0-9], one lower case letter [a-z], one upper case letter [A-Z],
+	// and one special character from a list: (@&$#%_)
+	re := regexp.MustCompile(`([a-zA-Z0-9_@$#_:&%%]{12,})`)
+	hasDigitsRe := regexp.MustCompile(`([!^0-9])`)
+	hasLowerRe := regexp.MustCompile(`([!^a-z])`)
+	hasUpperRe := regexp.MustCompile(`([!^A-Z])`)
+	hasSymbolsRe := regexp.MustCompile(`([!^@|%%|$|#|&])`)
+
+	return re.MatchString(password) &&
+		hasDigitsRe.MatchString(password) &&
+		hasLowerRe.MatchString(password) &&
+		hasUpperRe.MatchString(password) &&
+		hasSymbolsRe.MatchString(password)
 }
 
 func validateUsername(clientName string) bool {

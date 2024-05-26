@@ -14,7 +14,6 @@ import (
 	dynamodb "github.com/isnastish/chat/pkg/session/backend/dynamodb"
 	memory "github.com/isnastish/chat/pkg/session/backend/memory"
 	redis "github.com/isnastish/chat/pkg/session/backend/redis"
-	"github.com/rs/zerolog/log"
 )
 
 type SessionConfig struct {
@@ -101,12 +100,12 @@ Loop:
 			case <-session.quitCh:
 				// terminate the session if no participants connected
 				// for the whole timeout duration.
-				log.Info().Msg(
+				logger.Info().Msg(
 					"no participants connected, shutting down the session",
 				)
 				break Loop
 			default:
-				log.Warn().Msgf(
+				logger.Warn().Msgf(
 					"client failed to connect: %s",
 					conn.RemoteAddr().String(),
 				)
