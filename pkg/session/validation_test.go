@@ -19,11 +19,13 @@ func TestValidatePassword(t *testing.T) {
 	assert.False(t, validatePassword("password2348"))
 	assert.False(t, validatePassword("ThisPa2swordExceeeeeedsTheAllowedAmountOfCharacters"))
 	assert.False(t, validatePassword(".a"))
+	assert.False(t, validateName("")) // too short
 
 	// valid passwords
 	assert.True(t, validatePassword("Afdsf988#@Nasayer"))
 	assert.True(t, validatePassword("2344NewYear@lone"))
 	assert.True(t, validatePassword("NeverAgain1999#"))
+	assert.True(t, validateName("a")) // valid username, a single character
 }
 
 func TestValidateName(t *testing.T) {

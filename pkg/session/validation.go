@@ -29,7 +29,7 @@ func validateName(name string) bool {
 	// A name should be at least 8 characters long, but not exceed 32.
 	// And cannot start with a digit or an underscore  [0-9]|_.
 	// \w - [0-9A-Za-z_]
-	re := regexp.MustCompile(`^[\w]{8,32}$`)
+	re := regexp.MustCompile(`^[\w]{1,32}$`)
 	beginWithRe := regexp.MustCompile(`^[a-zA-Z]`)
 
 	return re.MatchString(name) &&
@@ -102,4 +102,9 @@ func validateEmailAddress(emailAddress string) bool {
 	}
 
 	return true
+}
+
+func validateHash(sha256 string) bool {
+	// TODO(alx): Validate hashes as well?
+	return false
 }

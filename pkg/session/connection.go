@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"strings"
@@ -178,14 +179,12 @@ type Reader struct {
 	quitSignalCh      chan struct{}
 
 	// Buffer for storing bytes read from a connection.
-	buffer []byte
-
-	// TODO(alx): Replace string(s) with []byte arrays?
+	buffer *bytes.Buffer
 
 	// Placeholders for participant's data.
-	participantsName           string
-	participantsPasswordSha256 string
-	participantsEmailAddress   string
+	participantName           string
+	participantEmailAddress   string
+	participantPasswordSha256 string
 
 	// Set to true if a participant was auathenticated or registered successfully.
 	isConnected bool
@@ -206,7 +205,6 @@ func newReader(conn net.Conn, connIpAddr string, connectionTimeout time.Duration
 		idleConnectionsCh: make(chan struct{}),
 		abortSignalCh:     make(chan struct{}),
 		quitSignalCh:      make(chan struct{}),
-		buffer:            make([]byte, 0, 1024),
 	}
 }
 
@@ -237,23 +235,13 @@ func (reader *Reader) disconnectIfIdle() {
 	}
 }
 
-type ReadResult struct {
-	bytesRead int32
-	asBytes   []byte
-	asStr     string
-	err       error
-}
+func (reader *Reader) read() error {
+	buffer := make([]byte, 1024)
+	bytesRead, err := reader.conn.Read(buffer)
+	trimmedBuffer := []byte(strings.Trim(string(buffer[:bytesRead]), " \r\n\v\t\f"))
+	reader.buffer = bytes.NewBuffer(trimmedBuffer)
 
-func (reader *Reader) read() ReadResult {
-	bytesRead, err := reader.conn.Read(reader.buffer)
-	str := strings.Trim(string(reader.buffer[:bytesRead]), " \\t\\r\\n\\v\\f")
-
-	return ReadResult{
-		bytesRead: int32(bytesRead),
-		asBytes:   reader.buffer[:bytesRead],
-		asStr:     str,
-		err:       err,
-	}
+	return err
 }
 
 func (connMap *ConnectionMap) broadcastParticipantMessage(message *backend.ParticipantMessage) (int32, int32) {

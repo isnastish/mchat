@@ -116,16 +116,14 @@ Loop:
 			}
 			continue
 		}
+
 		go session.handleConnection(conn)
+
+		session.timeoutClock.Stop()
 	}
 }
 
 func (session *Session) handleConnection(conn net.Conn) {
-	// stop the session from timing out since at least one participant has joined
-	if !session.timeoutClock.Stop() {
-		<-session.timeoutClock.C
-	}
-
 	// update the metrics
 	session.participantsJoined.Add(1)
 
@@ -151,8 +149,7 @@ func (session *Session) handleConnection(conn net.Conn) {
 			session.systemMessagesCh <- backend.MakeSystemMessage([]byte(menu), []string{connIpAddr})
 		}
 
-		input := reader.read()
-		if (input.err != nil) && (input.err != io.EOF) {
+		if err := reader.read(); (err != nil) && (err != io.EOF) {
 			select {
 			case <-reader.idleConnectionsCh:
 				// Notify idle participant that it will be disconnected
@@ -167,7 +164,7 @@ func (session *Session) handleConnection(conn net.Conn) {
 		// NOTE: When an opposite side closes the connection, we read zero bytes.
 		// In that case we have to stop disconnectIfIdle function and
 		// set the state to Disconnecting.
-		if input.bytesRead == 0 {
+		if reader.buffer.Len() == 0 {
 			close(reader.quitSignalCh)
 			reader.state = Disconnecting
 		}
@@ -175,10 +172,20 @@ func (session *Session) handleConnection(conn net.Conn) {
 		if reader.isState(ProcessingMenu) {
 			logger.Info("processing menu")
 
-			option, _ := strconv.Atoi(input.asStr)
+			option, err := strconv.Atoi(reader.buffer.String())
+			if err != nil {
+				session.systemMessagesCh <- backend.MakeSystemMessage(
+					[]byte(fmt.Sprintf("option {%s} is not supported", reader.buffer.String())),
+					receiver,
+				)
+				continue
+			}
+
 			switch option {
 			case RegisterParticipant:
 				if !reader.isConnected {
+					logger.Info("registering new participant")
+
 					reader.state = RegisteringNewParticipant
 					reader.substate = ProcessingName
 					session.systemMessagesCh <- backend.MakeSystemMessage(usernameMessageContents, receiver)
@@ -191,6 +198,8 @@ func (session *Session) handleConnection(conn net.Conn) {
 
 			case AuthenticateParticipant:
 				if !reader.isConnected {
+					logger.Info("authenticating participant")
+
 					reader.state = AuthenticatingParticipant
 					reader.substate = ProcessingName
 					session.systemMessagesCh <- backend.MakeSystemMessage(usernameMessageContents, receiver)
@@ -208,6 +217,8 @@ func (session *Session) handleConnection(conn net.Conn) {
 						receiver,
 					)
 				} else {
+					logger.Info("creating channel")
+
 					reader.state = CreatingNewChannel
 					reader.substate = ProcessingName
 					session.systemMessagesCh <- backend.MakeSystemMessage(
@@ -223,6 +234,8 @@ func (session *Session) handleConnection(conn net.Conn) {
 						receiver,
 					)
 				} else {
+					logger.Info("selecting channel")
+
 					reader.state = SelectingChannel
 					empty, channelList := buildChannelList(session)
 					if !empty {
@@ -232,7 +245,7 @@ func (session *Session) handleConnection(conn net.Conn) {
 						)
 					} else {
 						session.systemMessagesCh <- backend.MakeSystemMessage(
-							[]byte("no channels were created yet"),
+							[]byte(CR("no channels were created yet")),
 							receiver,
 						)
 					}
@@ -246,168 +259,169 @@ func (session *Session) handleConnection(conn net.Conn) {
 				logger.Info("unknown option")
 				// If participant's input doesn't match any option,
 				// sent a message that an option is not supported.
-				contents := []byte(fmt.Sprintf("option {%s} is not supported", input.asStr))
+				contents := []byte(CR(fmt.Sprintf("option {%s} is not supported", reader.buffer.String())))
 				session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
 			}
 
 		} else if reader.isState(RegisteringNewParticipant) {
-			logger.Info("registering new participant")
-
 			if reader.isSubstate(ProcessingName) {
 				reader.substate = ProcessingParticipantsEmailAddress
-				reader.participantsName = input.asStr
+				reader.participantName = reader.buffer.String()
 				session.systemMessagesCh <- backend.MakeSystemMessage(emailAddressMessageContents, receiver)
 			} else if reader.isSubstate(ProcessingParticipantsEmailAddress) {
 				reader.substate = ProcessingParticipantsPassword
-				reader.participantsEmailAddress = input.asStr
+				reader.participantEmailAddress = reader.buffer.String()
 				session.systemMessagesCh <- backend.MakeSystemMessage(passwordMessageContents, receiver)
 			} else if reader.isSubstate(ProcessingParticipantsPassword) {
-				reader.participantsPasswordSha256 = Sha256(input.asBytes)
-
 				validationSucceeded := false
-				if validateName(reader.participantsName) {
-					if validateEmailAddress(reader.participantsEmailAddress) {
-						// Password validation should be done on the raw data rather than on a sha256
-						if validatePassword(input.asStr) {
+				if validateName(reader.participantName) {
+					if validateEmailAddress(reader.participantEmailAddress) {
+						if validatePassword(reader.buffer.String()) {
 							validationSucceeded = true
 						} else {
 							session.systemMessagesCh <- backend.MakeSystemMessage(
-								[]byte("password validation failed"),
+								[]byte(CR("password validation failed")),
 								receiver,
 							)
 						}
 					} else {
 						session.systemMessagesCh <- backend.MakeSystemMessage(
-							[]byte("email address validation failed"),
+							[]byte(CR("email address validation failed")),
 							receiver,
 						)
 					}
 				} else {
 					session.systemMessagesCh <- backend.MakeSystemMessage(
-						[]byte("name validation failed"),
+						[]byte(CR("name validation failed")),
 						receiver,
 					)
 				}
 
-				if validationSucceeded &&
-					!session.storage.HasParticipant(reader.participantsName) {
-					session.connections.assignParticipant(
-						connIpAddr,
-						&backend.Participant{
-							Name:     reader.participantsName,
-							JoinTime: time.Now().Format(time.DateTime),
-						},
-					)
+				if validationSucceeded {
+					if !session.storage.HasParticipant(reader.participantName) {
+						session.connections.assignParticipant(
+							connIpAddr,
+							&backend.Participant{
+								Name:     reader.participantName,
+								JoinTime: time.Now().Format(time.DateTime),
+							},
+						)
 
-					session.storage.RegisterParticipant(
-						reader.participantsName,
-						reader.participantsPasswordSha256,
-						reader.participantsEmailAddress,
-					)
+						reader.participantPasswordSha256 = Sha256(reader.buffer.Bytes())
+						session.storage.RegisterParticipant(
+							reader.participantName,
+							reader.participantPasswordSha256,
+							reader.participantEmailAddress,
+						)
+
+						reader.state = AcceptingMessages
+						reader.substate = NotSet
+
+					} else {
+						reader.state = ProcessingMenu
+						reader.substate = NotSet
+
+						session.systemMessagesCh <- backend.MakeSystemMessage(
+							[]byte(CR(fmt.Sprintf("participant {%s} already exists", reader.participantName))),
+							receiver,
+						)
+					}
 				} else {
 					reader.state = ProcessingMenu
 					reader.substate = NotSet
-					session.systemMessagesCh <- backend.MakeSystemMessage(
-						[]byte(fmt.Sprintf("participant {%s} already exists", reader.participantsName)),
-						receiver,
-					)
 				}
 			}
 		} else if reader.isState(AuthenticatingParticipant) {
-			logger.Info("authenticating participant")
-
 			if reader.isSubstate(ProcessingName) {
 				reader.substate = ProcessingParticipantsPassword
-				reader.participantsName = input.asStr
+				reader.participantName = reader.buffer.String()
 				session.systemMessagesCh <- backend.MakeSystemMessage(
 					passwordMessageContents,
 					receiver,
 				)
-
 			} else if reader.isSubstate(ProcessingParticipantsPassword) {
 				validationSucceeded := true
-				if validateName(reader.participantsName) {
-					if validatePassword(input.asStr) {
+				if validateName(reader.participantName) {
+					if validatePassword(reader.buffer.String()) {
 						validationSucceeded = true
 					} else {
 						session.systemMessagesCh <- backend.MakeSystemMessage(
-							[]byte("password validation failed"),
+							[]byte(CR("password validation failed")),
 							receiver,
 						)
 					}
 				} else {
 					session.systemMessagesCh <- backend.MakeSystemMessage(
-						[]byte("name validation failed"),
+						[]byte(CR("name validation failed")),
 						receiver,
 					)
 				}
 
-				reader.participantsPasswordSha256 = Sha256(input.asBytes)
-				if validationSucceeded &&
-					session.storage.AuthParticipant(reader.participantsName, reader.participantsPasswordSha256) {
-					reader.state = AcceptingMessages
+				if validationSucceeded {
+					reader.participantPasswordSha256 = Sha256(reader.buffer.Bytes())
+					if session.storage.AuthParticipant(reader.participantName, reader.participantPasswordSha256) {
+						reader.state = AcceptingMessages
 
-					empty, chatHistory := buildChatHistory(session)
-					if !empty {
-						session.systemMessagesCh <- backend.MakeSystemMessage(
-							[]byte(chatHistory),
-							receiver,
-						)
-					}
+						empty, chatHistory := buildChatHistory(session)
+						if !empty {
+							session.systemMessagesCh <- backend.MakeSystemMessage(
+								[]byte(chatHistory),
+								receiver,
+							)
+						}
 
-					empty, participantList := buildParticipantList(session)
-					if !empty {
+						empty, participantList := buildParticipantList(session)
+						if !empty {
+							session.systemMessagesCh <- backend.MakeSystemMessage(
+								[]byte(participantList),
+								receiver,
+							)
+						}
+					} else {
+						reader.substate = NotSet
 						session.systemMessagesCh <- backend.MakeSystemMessage(
-							[]byte(participantList),
+							[]byte(CR("authentication failed, name or password is incorrect")),
 							receiver,
 						)
 					}
 				} else {
+					reader.state = ProcessingMenu
 					reader.substate = NotSet
-					session.systemMessagesCh <- backend.MakeSystemMessage(
-						[]byte("authentication failed, name or password is incorrect"),
-						receiver,
-					)
 				}
 			}
 		} else if reader.isState(AcceptingMessages) {
-			logger.Info("accepting messages")
-
-			// TODO(alx): Remove the duplications.
-			// Maybe accept the slice inside StoreMessage procedure
-			// instead of variadic arguments.
 			if reader.channelIsSet {
 				session.storage.StoreMessage(
-					reader.participantsName,
+					reader.participantName,
 					time.Now().Format(time.DateTime),
-					input.asBytes, reader.curChannel.Name,
+					reader.buffer.Bytes(), reader.curChannel.Name,
 				)
 				session.participantMessagesCh <- backend.MakeParticipantMessage(
-					input.asBytes,
-					reader.participantsName,
+					reader.buffer.Bytes(),
+					reader.participantName,
 					reader.curChannel.Name,
 				)
 			} else {
 				session.storage.StoreMessage(
-					reader.participantsName,
+					reader.participantName,
 					time.Now().Format(time.DateTime),
-					input.asBytes,
+					reader.buffer.Bytes(),
 				)
+
 				session.participantMessagesCh <- backend.MakeParticipantMessage(
-					input.asBytes,
-					reader.participantsName,
+					reader.buffer.Bytes(),
+					reader.participantName,
 				)
 			}
+
 			session.receivedParticipantMessages.Add(1)
 
 		} else if reader.isState(CreatingNewChannel) {
-			logger.Info("creating channel")
-
 			// TODO(alx): What if the channel has already been created?
 			// channelIsSet is equal to True?
-			if validateName(input.asStr) {
+			if validateName(reader.buffer.String()) {
 				if reader.isSubstate(ProcessingName) {
-					reader.curChannel.Name = input.asStr
+					reader.curChannel.Name = reader.buffer.String()
 					reader.substate = ProcessingChannelsDesc
 
 					session.systemMessagesCh <- backend.MakeSystemMessage(
@@ -415,16 +429,16 @@ func (session *Session) handleConnection(conn net.Conn) {
 						receiver,
 					)
 				} else if reader.isSubstate(ProcessingChannelsDesc) {
-					reader.curChannel.Desc = input.asStr
+					reader.curChannel.Desc = reader.buffer.String()
 					if session.storage.HasChannel(reader.curChannel.Name) {
-						contents := []byte(fmt.Sprintf("channel {%s} aready exists", reader.curChannel.Name))
+						contents := []byte(CR(fmt.Sprintf("channel {%s} aready exists", reader.curChannel.Name)))
 						session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
 						reader.state = ProcessingMenu
 					} else {
 						session.storage.RegisterChannel(
 							reader.curChannel.Name,
 							reader.curChannel.Desc,
-							reader.participantsName,
+							reader.participantName,
 						)
 						reader.state = AcceptingMessages
 					}
@@ -438,18 +452,16 @@ func (session *Session) handleConnection(conn net.Conn) {
 				)
 			}
 		} else if reader.isState(SelectingChannel) {
-			logger.Info("selecting channel")
-
 			// TODO(alx): What if while we were in a process of selecting a channel,
 			// another channel has been created or deleted?
 			// The problem only arises when the owner has deleted a channel,
 			// with creating new onces the index will be incremented and won't affect our selection.
 			// Let's ignore the deletion process for now.
-			index, err := strconv.Atoi(input.asStr)
+			index, err := strconv.Atoi(reader.buffer.String())
 			if err != nil {
 				_, channelList := buildChannelList(session)
 				session.systemMessagesCh <- backend.MakeSystemMessage(
-					[]byte(fmt.Sprintf("input {%s} doesn't match any channels", input.asStr)),
+					[]byte(CR(fmt.Sprintf("input {%s} doesn't match any channels", reader.buffer.String()))),
 					receiver,
 				)
 				session.systemMessagesCh <- backend.MakeSystemMessage(
@@ -487,7 +499,7 @@ func (session *Session) handleConnection(conn net.Conn) {
 	// If a participant was able to connect, sent a message to all
 	// other participants that it was disconnected.
 	if reader.isConnected {
-		contents := []byte(fmt.Sprintf("{%s} disconnected", reader.participantsName))
+		contents := []byte(CR(fmt.Sprintf("{%s} disconnected", reader.participantName)))
 		session.systemMessagesCh <- backend.MakeSystemMessage(contents, []string{})
 	}
 
@@ -511,17 +523,23 @@ func (session *Session) processMessages() {
 	for session.running {
 		select {
 		case message := <-session.participantMessagesCh:
+			logger.Info("broadcasting participant's message")
+
 			dropped, broadcasted := session.connections.broadcastParticipantMessage(message)
 			session.broadcastedParticipantMessages.Add(broadcasted)
 			session.droppedParticipantMessages.Add(dropped)
 
 		case message := <-session.systemMessagesCh:
+			logger.Info("broadcasting system message")
+
 			droppedCount, sentCount := session.connections.broadcastSystemMessage(message)
 			// NOTE: Not sure whether we need to track down the amount of system messages we sent.
 			_ = droppedCount
 			_ = sentCount
 
 		case <-session.timeoutClock.C:
+			logger.Info("session timeout")
+
 			session.running = false
 			close(session.timeoutAbortCh)
 		}

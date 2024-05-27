@@ -76,16 +76,7 @@ Loop:
 		select {
 		case msg := <-c.incommingCh:
 			msgStr := string(msg.data)
-			// TODO:
-			// Introduce a table of reserved commands. All commans should be prefixed with @ to distinguish between regular messages.
-			// @name, @new_channel, @list_participants ...
-			if strings.Contains(msgStr, "@name:") {
-				fmt.Printf("%s", msgStr)
-			} else if strings.Contains(msgStr, "@password:") {
-				fmt.Printf("%s", msgStr)
-			} else {
-				fmt.Printf("%s\n", msgStr)
-			}
+			fmt.Printf("%s", msgStr)
 
 		case msg := <-c.outgoingCh:
 			messageSize := len(msg.data)

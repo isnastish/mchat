@@ -103,7 +103,6 @@ func TestRegisterNewParticipant(t *testing.T) {
 	// TODO(alx): Pull out into a function runClient()
 	go func() {
 		conn, err := net.Dial(config.Network, config.Addr)
-		fmt.Println("connection established")
 		assert.Equal(t, err, nil)
 		for {
 			buffer := make([]byte, 256)
