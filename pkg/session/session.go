@@ -54,6 +54,10 @@ func NewSession(config SessionConfig) *Session {
 		return nil
 	}
 
+	if config.Timeout == 0 {
+		config.Timeout = 86400 * time.Second // 24h
+	}
+
 	session := &Session{
 		connections:           newConnectionMap(),
 		timeoutClock:          time.NewTimer(config.Timeout),
@@ -91,6 +95,10 @@ func (session *Session) Run() {
 		close(session.quitCh)
 		session.listener.Close()
 	}()
+
+	logger.Info().Msgf(
+		"listening: %s", session.listener.Addr().String(),
+	)
 
 Loop:
 	for {
@@ -388,31 +396,40 @@ func (session *Session) handleConnection(conn net.Conn) {
 			session.receivedParticipantMessages.Add(1)
 
 		} else if reader.isState(CreatingNewChannel) {
-			// TODO(alx): Channel's name validation.
-			// Shouldn't exceed more than 64 characters.
-			// Has to contain numbers as well?
-			if reader.isSubstate(ProcessingName) {
-				reader.curChannel.Name = input.asStr
-				reader.substate = ProcessingChannelsDesc
+			// TODO(alx): What if the channel has already been created?
+			// channelIsSet is equal to True?
 
+			if validateName(input.asStr) {
+				if reader.isSubstate(ProcessingName) {
+					reader.curChannel.Name = input.asStr
+					reader.substate = ProcessingChannelsDesc
+
+					session.systemMessagesCh <- backend.MakeSystemMessage(
+						channelsDescMessageContents,
+						receiver,
+					)
+				} else if reader.isSubstate(ProcessingChannelsDesc) {
+					reader.curChannel.Desc = input.asStr
+					if session.storage.HasChannel(reader.curChannel.Name) {
+						contents := []byte(fmt.Sprintf("channel {%s} aready exists", reader.curChannel.Name))
+						session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
+						reader.state = ProcessingMenu
+					} else {
+						session.storage.RegisterChannel(
+							reader.curChannel.Name,
+							reader.curChannel.Desc,
+							reader.participantsName,
+						)
+						reader.state = AcceptingMessages
+					}
+				}
+			} else {
+				reader.state = CreatingNewChannel
+				reader.substate = NotSet
 				session.systemMessagesCh <- backend.MakeSystemMessage(
-					channelsDescMessageContents,
+					[]byte("channel's name validation failed, try a different name"),
 					receiver,
 				)
-			} else if reader.isSubstate(ProcessingChannelsDesc) {
-				reader.curChannel.Desc = input.asStr
-				if session.storage.HasChannel(reader.curChannel.Name) {
-					contents := []byte(fmt.Sprintf("channel {%s} aready exists", reader.curChannel.Name))
-					session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
-					reader.state = ProcessingMenu
-				} else {
-					session.storage.RegisterChannel(
-						reader.curChannel.Name,
-						reader.curChannel.Desc,
-						reader.participantsName,
-					)
-					reader.state = AcceptingMessages
-				}
 			}
 		} else if reader.isState(SelectingChannel) {
 			// TODO(alx): What if while we were in a process of selecting a channel,

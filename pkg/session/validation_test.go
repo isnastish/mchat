@@ -45,7 +45,13 @@ func TestValidateEmailAddress(t *testing.T) {
 	// invalid names
 	assert.False(t, validateEmailAddress("John..Doe@example.com"))
 	assert.False(t, validateEmailAddress("abc.example.com"))
-	assert.False(t, validateEmailAddress("i.like.underscores@but_they_are_not_allowed_in_this_part")) // underscore is not allowed in domain part
+	assert.False(t, validateEmailAddress("i.like.underscores@but_they_are_not_allowed_in_this_part"))                       // underscore is not allowed in domain part
+	assert.False(t, validateEmailAddress("a@b@c@example.com"))                                                              // only one @ is allowed outside quotation marks
+	assert.False(t, validateEmailAddress(`a"b(c)d,e:f;g<h>i[j\k]l@example.com`))                                            // none of the special characters in this local-part are allowed outside quotation marks
+	assert.False(t, validateEmailAddress(`just"not"right@example.com`))                                                     // quoted strings must be dot separated or be the only element making up the local-part
+	assert.False(t, validateEmailAddress(`this is"not\allowed@example.com`))                                                // spaces, quotes, and backslashes may only exist when within quoted strings and preceded by a backslash
+	assert.False(t, validateEmailAddress(`this\ still\"not\\allowed@example.com`))                                          // even if escaped (preceded by a backslash), spaces, quotes, and backslashes must still be contained by quotes
+	assert.False(t, validateEmailAddress(`1234567890123456789012345678901234567890123456789012345678901234+x@example.com`)) // local-part is longer than 64 characters
 
 	// valid names
 	assert.True(t, validateEmailAddress("John.Doe@example.com"))

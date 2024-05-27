@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/isnastish/chat/pkg/session"
 	backend "github.com/isnastish/chat/pkg/session/backend"
@@ -11,6 +12,7 @@ import (
 
 func main() {
 	config := session.SessionConfig{}
+	config.Timeout = 15 * time.Second
 
 	flag.StringVar(&config.Network, "network", "tcp", "network protocol (tcp|udp)")
 	flag.StringVar(&config.Addr, "address", ":5000", "address to listen in")

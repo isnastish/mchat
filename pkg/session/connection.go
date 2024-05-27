@@ -194,7 +194,7 @@ type Reader struct {
 func newReader(conn net.Conn, connIpAddr string, connectionTimeout time.Duration) *Reader {
 	return &Reader{
 		conn:              conn,
-		ipAddr:            conn.LocalAddr().String(),
+		ipAddr:            connIpAddr,
 		state:             ProcessingMenu,
 		connectionTimeout: time.NewTimer(connectionTimeout),
 		timeoutDuration:   connectionTimeout,
