@@ -27,6 +27,7 @@ var menuOptionsTable = []string{
 	"Exit",              // Exit the sesssion.
 }
 
+// TODO(alx): Switch to int8
 type ConnectionState int32
 
 const (
@@ -39,12 +40,16 @@ var connectionStateTable = []string{
 	"online",
 }
 
+var menuMessageHeader = []byte("options:\r\n")
+var channelsMessageHeader = []byte("channels:\r\n")
+var participantListMessageHeader = []byte("participants:\r\n")
 var usernameMessageContents = []byte("username: ")
 var passwordMessageContents = []byte("password: ")
 var emailAddressMessageContents = []byte("email address: ")
 var channelsNameMessageContents = []byte("channel's name: ")
 var channelsDescMessageContents = []byte("channel's desc: ")
 
+// TODO(alx): Switch to int8
 type ReaderState int32
 type ReaderSubstate int32
 

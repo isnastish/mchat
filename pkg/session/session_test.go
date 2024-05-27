@@ -1,11 +1,13 @@
 package session
 
 import (
+	"fmt"
 	"net"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
-	backend "github.com/isnastish/chat/pkg/session/backend"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/goleak"
 )
@@ -16,18 +18,25 @@ type participant struct {
 	emailAddress string
 }
 
-// var participants = []participant{
-// 	{"Ivan Ivanov", "ThisIsI1sPassw0rd"},
-// 	{"Mark Lutz", "Some_other_password"},
-// 	{"Johan Novak", "johans_pathword_234"},
-// 	{"Robin Hood", "bow_is_life_1024"},
-// 	{"Wo Gang", "woo_gang_234234"},
-// 	{"Li Pu", "my_dog_2017"},
-// 	{"Hanna Hoflan", "some_random_password_here"},
-// 	{"Ivan Istberg", "234340_sdfsdfuu"},
-// 	{"Noir Nasaiier", "tyheroi_34234"},
-// 	{"Mark Zuckerberg", "mark_zuckergerg_2033"},
-// }
+var network = "tcp"
+var address = "127.0.0.1:5000"
+
+var participants = []participant{
+	{"Ivan Ivanov", "ThisIsI1sPassw0rd", "example@gmail.com"},
+	// {"Mark Lutz", "Some_other_password"},
+	// {"Johan Novak", "johans_pathword_234"},
+	// {"Robin Hood", "bow_is_life_1024"},
+	// {"Wo Gang", "woo_gang_234234"},
+	// {"Li Pu", "my_dog_2017"},
+	// {"Hanna Hoflan", "some_random_password_here"},
+	// {"Ivan Istberg", "234340_sdfsdfuu"},
+	// {"Noir Nasaiier", "tyheroi_34234"},
+	// {"Mark Zuckerberg", "mark_zuckergerg_2033"},
+}
+
+func eatWhitespaces(buffer []byte) string {
+	return strings.Trim(string(buffer), " \\r\\n\\t\\f\\v")
+}
 
 // func createClient(t *testing.T,
 // 	networkProtocol, address string,
@@ -72,20 +81,61 @@ func TestShutdownSessionIfNobodyConnected(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	config := SessionConfig{
-		Network:     "tcp",
-		Addr:        "127.0.0.1:5000",
-		BackendType: backend.BackendTypeMemory,
-		Timeout:     3 * time.Second,
+		Network: network,
+		Addr:    address,
+		Timeout: 3 * time.Second,
 	}
 
 	session := NewSession(config)
+	session.Run()
+	assert.Equal(t, session.participantsJoined.Load(), 0)
+}
+
+func TestRegisterNewParticipant(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	config := SessionConfig{
+		Network: network,
+		Addr:    address,
+	}
+
+	session := NewSession(config)
+	// TODO(alx): Pull out into a function runClient()
 	go func() {
 		conn, err := net.Dial(config.Network, config.Addr)
-
+		fmt.Println("connection established")
 		assert.Equal(t, err, nil)
-		conn.Close()
+		for {
+			buffer := make([]byte, 256)
+			bytesRead, err := conn.Read(buffer)
+			if err != nil || bytesRead == 0 {
+				return
+			}
+
+			input := eatWhitespaces(buffer[:bytesRead])
+
+			if strings.Contains(input, string(menuMessageHeader)) {
+				conn.Write([]byte(strconv.Itoa(RegisterParticipant)))
+				fmt.Println("RegisteringNewparticipant")
+			} else if strings.Contains(input, string(usernameMessageContents)) {
+				conn.Write([]byte(participants[0].name))
+				fmt.Println("Entering participants username")
+			} else if strings.Contains(input, string(emailAddressMessageContents)) {
+				conn.Write([]byte(participants[0].emailAddress))
+			} else if strings.Contains(input, string(passwordMessageContents)) {
+				conn.Write([]byte(participants[0].password))
+				// close the connection
+				conn.Close()
+				fmt.Println("connection is closed")
+			}
+		}
 	}()
 	session.Run()
+	assert.True(t, session.storage.HasParticipant(participants[0].name))
+}
+
+func TestAuthenticateParticipant(t *testing.T) {
+	defer goleak.VerifyNone(t)
 }
 
 /*

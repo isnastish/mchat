@@ -37,7 +37,7 @@ func validateName(name string) bool {
 }
 
 func validateEmailAddress(emailAddress string) bool {
-	// TODO(alx): Handle quoted email addresses.
+	// TODO(alx): Handle quoted email addresses?
 
 	// Reference: https: //en.wikipedia.org/wiki/Email_address
 	// Local-part

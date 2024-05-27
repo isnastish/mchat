@@ -2,16 +2,17 @@ package logger
 
 import (
 	"fmt"
+	"github.com/rs/zerolog"
 	"os"
 	"strings"
 	"time"
-
-	"github.com/rs/zerolog"
 )
 
 type Logger struct {
-	level string
-	zerolog.Logger
+	level      string
+	zeroLogger zerolog.Logger
+
+	disabled bool
 }
 
 func setLogLevel(logLevel string) error {
@@ -54,9 +55,54 @@ func NewLogger(logLevel string) Logger {
 	}
 
 	logger := Logger{
-		level:  logLevel,
-		Logger: zerolog.New(output).With().Timestamp().Logger(),
+		level:      logLevel,
+		zeroLogger: zerolog.New(output).With().Timestamp().Logger(),
 	}
 
 	return logger
+}
+
+func (l *Logger) log(level zerolog.Level, format string, args ...any) {
+	if !l.disabled {
+		switch level {
+		case zerolog.InfoLevel:
+			l.zeroLogger.Info().Msgf(format, args...)
+		case zerolog.DebugLevel:
+			l.zeroLogger.Info().Msgf(format, args...)
+		case zerolog.WarnLevel:
+			l.zeroLogger.Info().Msgf(format, args...)
+		case zerolog.ErrorLevel:
+			l.zeroLogger.Error().Msgf(format, args...)
+		case zerolog.FatalLevel:
+			l.zeroLogger.Fatal().Msgf(format, args...)
+		case zerolog.PanicLevel:
+			l.zeroLogger.Panic().Msgf(format, args...)
+		case zerolog.TraceLevel:
+			l.zeroLogger.Trace().Msgf(format, args...)
+		}
+	}
+}
+
+func (l *Logger) Info(format string, args ...any) {
+	l.log(zerolog.InfoLevel, format, args...)
+}
+
+func (l *Logger) Debug(format string, args ...any) {
+	l.log(zerolog.DebugLevel, format, args...)
+}
+
+func (l *Logger) Warn(format string, args ...any) {
+	l.log(zerolog.WarnLevel, format, args...)
+}
+
+func (l *Logger) Error(format string, args ...any) {
+	l.log(zerolog.ErrorLevel, format, args...)
+}
+
+func (l *Logger) Fatal(format string, args ...any) {
+	l.log(zerolog.PanicLevel, format, args...)
+}
+
+func (l *Logger) Trace(format string, args ...any) {
+	l.log(zerolog.TraceLevel, format, args...)
 }

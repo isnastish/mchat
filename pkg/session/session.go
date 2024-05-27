@@ -50,7 +50,7 @@ func NewSession(config SessionConfig) *Session {
 	// TODO(alx): Implement tls security layer.
 	listener, err := net.Listen(config.Network, config.Addr)
 	if err != nil {
-		logger.Error().Msgf("failed to created a listener: %v", err.Error())
+		logger.Error("failed to created a listener: %v", err.Error())
 		return nil
 	}
 
@@ -96,9 +96,7 @@ func (session *Session) Run() {
 		session.listener.Close()
 	}()
 
-	logger.Info().Msgf(
-		"listening: %s", session.listener.Addr().String(),
-	)
+	logger.Info("listening: %s", session.listener.Addr().String())
 
 Loop:
 	for {
@@ -106,14 +104,12 @@ Loop:
 		if err != nil {
 			select {
 			case <-session.quitCh:
+				logger.Info("no participants connected, shutting down the session")
 				// terminate the session if no participants connected
 				// for the whole timeout duration.
-				logger.Info().Msg(
-					"no participants connected, shutting down the session",
-				)
 				break Loop
 			default:
-				logger.Warn().Msgf(
+				logger.Warn(
 					"client failed to connect: %s",
 					conn.RemoteAddr().String(),
 				)
@@ -177,6 +173,8 @@ func (session *Session) handleConnection(conn net.Conn) {
 		}
 
 		if reader.isState(ProcessingMenu) {
+			logger.Info("processing menu")
+
 			option, _ := strconv.Atoi(input.asStr)
 			switch option {
 			case RegisterParticipant:
@@ -241,17 +239,20 @@ func (session *Session) handleConnection(conn net.Conn) {
 				}
 
 			case Exit:
+				logger.Info("exiting session")
 				reader.state = Disconnecting
 
 			default:
+				logger.Info("unknown option")
 				// If participant's input doesn't match any option,
 				// sent a message that an option is not supported.
-				// State doesn't change.
 				contents := []byte(fmt.Sprintf("option {%s} is not supported", input.asStr))
 				session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
 			}
 
 		} else if reader.isState(RegisteringNewParticipant) {
+			logger.Info("registering new participant")
+
 			if reader.isSubstate(ProcessingName) {
 				reader.substate = ProcessingParticipantsEmailAddress
 				reader.participantsName = input.asStr
@@ -313,6 +314,8 @@ func (session *Session) handleConnection(conn net.Conn) {
 				}
 			}
 		} else if reader.isState(AuthenticatingParticipant) {
+			logger.Info("authenticating participant")
+
 			if reader.isSubstate(ProcessingName) {
 				reader.substate = ProcessingParticipantsPassword
 				reader.participantsName = input.asStr
@@ -368,6 +371,8 @@ func (session *Session) handleConnection(conn net.Conn) {
 				}
 			}
 		} else if reader.isState(AcceptingMessages) {
+			logger.Info("accepting messages")
+
 			// TODO(alx): Remove the duplications.
 			// Maybe accept the slice inside StoreMessage procedure
 			// instead of variadic arguments.
@@ -396,9 +401,10 @@ func (session *Session) handleConnection(conn net.Conn) {
 			session.receivedParticipantMessages.Add(1)
 
 		} else if reader.isState(CreatingNewChannel) {
+			logger.Info("creating channel")
+
 			// TODO(alx): What if the channel has already been created?
 			// channelIsSet is equal to True?
-
 			if validateName(input.asStr) {
 				if reader.isSubstate(ProcessingName) {
 					reader.curChannel.Name = input.asStr
@@ -432,6 +438,8 @@ func (session *Session) handleConnection(conn net.Conn) {
 				)
 			}
 		} else if reader.isState(SelectingChannel) {
+			logger.Info("selecting channel")
+
 			// TODO(alx): What if while we were in a process of selecting a channel,
 			// another channel has been created or deleted?
 			// The problem only arises when the owner has deleted a channel,

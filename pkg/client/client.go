@@ -41,10 +41,10 @@ func NewClient(network, address string) (*Client, error) {
 		remoteConn, lastErr = net.Dial(network, address)
 		if lastErr != nil {
 			nretries++
-			log.Info().Msg("connection failed, retrying...")
+			log.Info("connection failed, retrying...")
 			time.Sleep(3000 * time.Millisecond)
 		} else {
-			log.Info().Msgf("connected to remote session: %s", remoteConn.RemoteAddr().String())
+			log.Info("connected to remote session: %s", remoteConn.RemoteAddr().String())
 			break
 		}
 	}
@@ -94,7 +94,7 @@ Loop:
 			for bytesWritten < messageSize {
 				n, err := c.remoteConn.Write(msg.data[bytesWritten:])
 				if err != nil {
-					log.Error().Msgf("failed to write to a remote connection: %s", err.Error())
+					log.Error("failed to write to a remote connection: %s", err.Error())
 					break
 				}
 				bytesWritten += n
@@ -120,14 +120,14 @@ func (c *Client) recv() {
 	for {
 		nbytes, err := c.remoteConn.Read(buf)
 		if err != nil && err != io.EOF {
-			log.Error().Msgf("failed to read from the remote connnection: %s", err.Error())
+			log.Error("failed to read from the remote connnection: %s", err.Error())
 			c.remoteConn.Close()
 			close(c.quitCh)
 			break
 		}
 
 		if nbytes == 0 {
-			log.Info().Msg("remote session closed the connection")
+			log.Info("remote session closed the connection")
 			close(c.quitCh)
 			return
 		}
@@ -146,7 +146,7 @@ func (c *Client) send() {
 	for {
 		bytesRead, err := inputReader.Read(buf)
 		if err != nil && err != io.EOF {
-			log.Error().Msg("failed to read the input")
+			log.Error("failed to read the input")
 			break
 		}
 
