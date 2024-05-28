@@ -28,8 +28,7 @@ var menuOptionsTable = []string{
 	"Exit",              // Exit the sesssion.
 }
 
-// TODO(alx): Switch to int8
-type ConnectionState int32
+type ConnectionState int8
 
 const (
 	Pending   ConnectionState = 0x1
@@ -50,9 +49,8 @@ var emailAddressMessageContents = []byte("email address: ")
 var channelsNameMessageContents = []byte("channel's name: ")
 var channelsDescMessageContents = []byte("channel's desc: ")
 
-// TODO(alx): Switch to int8
-type ReaderState int32
-type ReaderSubstate int32
+type ReaderState int8
+type ReaderSubstate int8
 
 // TODO(alx): Combine listing channels and selecting channels all together.
 // SelectChannels will list all available channels and wait for the input.
@@ -84,7 +82,7 @@ type Connection struct {
 	ipAddr string
 
 	// TODO(alx): Document in the architecture.md file that a participant only
-	// present when the state is Connect.
+	// present when the state is Connected.
 	state       ConnectionState
 	participant *backend.Participant
 }

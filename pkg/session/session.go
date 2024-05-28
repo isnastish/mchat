@@ -127,7 +127,7 @@ func (session *Session) handleConnection(conn net.Conn) {
 	// update the metrics
 	session.participantsJoined.Add(1)
 
-	connIpAddr := conn.LocalAddr().String()
+	connIpAddr := conn.RemoteAddr().String()
 
 	receiver := []string{connIpAddr}
 
@@ -299,6 +299,9 @@ func (session *Session) handleConnection(conn net.Conn) {
 
 				if validationSucceeded {
 					if !session.storage.HasParticipant(reader.participantName) {
+						// NOTE: It's a desired behaviour that we don't specify password and email
+						// address, only the name. The comparison while broadcasting messages will
+						// be done using a name rather than any other data.
 						session.connections.assignParticipant(
 							connIpAddr,
 							&backend.Participant{
@@ -314,6 +317,25 @@ func (session *Session) handleConnection(conn net.Conn) {
 							reader.participantEmailAddress,
 						)
 
+						// Display a chat history
+						empty, history := buildChatHistory(session)
+						if !empty {
+							session.systemMessagesCh <- backend.MakeSystemMessage(
+								[]byte(history),
+								receiver,
+							)
+						}
+
+						// Display a participant list
+						empty, participantList := buildParticipantList(session)
+						if !empty {
+							session.systemMessagesCh <- backend.MakeSystemMessage(
+								[]byte(participantList),
+								receiver,
+							)
+						}
+
+						// Set the state to accept new messages
 						reader.state = AcceptingMessages
 						reader.substate = NotSet
 
@@ -408,8 +430,9 @@ func (session *Session) handleConnection(conn net.Conn) {
 					reader.buffer.Bytes(),
 				)
 
+				// TODO(alx): Figure out a better way of CRLF to a message.
 				session.participantMessagesCh <- backend.MakeParticipantMessage(
-					reader.buffer.Bytes(),
+					[]byte(CR(reader.buffer.String())),
 					reader.participantName,
 				)
 			}
