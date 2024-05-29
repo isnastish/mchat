@@ -6,6 +6,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	// To be removed
+	"fmt"
 )
 
 type test_participant struct {
@@ -53,10 +56,13 @@ func client(menuOption MenuOptionType,
 		if strings.Contains(buf.String(), string(menuMessageHeader)) {
 			conn.Write([]byte(strconv.Itoa(int(menuOption))))
 		} else if strings.Contains(buf.String(), string(usernameMessageContents)) {
+			fmt.Println("processing username")
 			conn.Write([]byte(participants[0].name))
 		} else if strings.Contains(buf.String(), string(emailAddressMessageContents)) {
+			fmt.Println("processing email address")
 			conn.Write([]byte(participants[0].emailAddress))
 		} else if strings.Contains(buf.String(), string(passwordMessageContents)) {
+			fmt.Println("processing password")
 			conn.Write([]byte(participants[0].password))
 			if onPasswordSubmittedCallback(conn) {
 				return

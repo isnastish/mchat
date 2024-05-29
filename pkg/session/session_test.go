@@ -39,45 +39,48 @@ func TestRegisterNewParticipant(t *testing.T) {
 func TestAuthenticateParticipant(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
+	wg := sync.WaitGroup{}
+	message := []byte("Authentication succeeded!")
 	session := NewSession(config)
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
+	wg.Add(2)
+	go func() {
+		session.Run()
+		wg.Done()
+	}()
+
+	client(
+		RegisterParticipant,
+		&config,
+		&participants[0],
+		func(c net.Conn) bool { c.Close(); return true },
+		func(buf *bytes.Buffer, c net.Conn) bool { return true },
+	)
 
 	go func() {
 		client(
-			RegisterParticipant,
+			AuthenticateParticipant,
 			&config,
 			&participants[0],
-			func(c net.Conn) bool { c.Close(); return true },
-			func(buf *bytes.Buffer, c net.Conn) bool { return true },
+			func(c net.Conn) bool { return false },
+			func(buf *bytes.Buffer, c net.Conn) bool {
+				c.Write([]byte(message))
+				c.Close()
+				return true
+			},
 		)
 		wg.Done()
 	}()
-	// wait for the first client to terminate, so we can rejoin the participant and make
-	// sure that it exists in session's storage.
 	wg.Wait()
+	assert.True(t, session.storage.HasParticipant(participants[0].name))
 
-	// TODO(alx): The order is incorrect, we never get to session.Run()
+	chatHistory := session.storage.GetChatHistory()
 
-	go client(
-		AuthenticateParticipant,
-		&config,
-		&participants[0],
-		func(c net.Conn) bool { return false },
-		func(buf *bytes.Buffer, c net.Conn) bool {
-			c.Write([]byte("Hello. This is my first chat message!"))
-			c.Close()
-			return true
-		},
-	)
-	session.Run()
-
-	assert.Equal(t, session.storage.GetChatHistory(), 1)
+	assert.Equal(t, len(chatHistory), 1)
+	assert.Equal(t, chatHistory[0].Contents, message)
 }
 
-/*
-func TestRegisterNewClient(t *testing.T) {
+/*func TestRegisterNewClient(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	doneCh := make(chan struct{})

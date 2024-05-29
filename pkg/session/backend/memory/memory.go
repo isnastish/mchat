@@ -49,7 +49,7 @@ func (b *MemoryBackend) RegisterParticipant(username string, passwordShaw256 str
 
 func (b *MemoryBackend) AuthParticipant(username string, passwordSha256 string) bool {
 	b.mu.Lock()
-	defer b.mu.Lock()
+	defer b.mu.Unlock()
 	participant, exists := b.participants[username]
 	if exists {
 		return strings.EqualFold(participant.PasswordSha256, passwordSha256)
