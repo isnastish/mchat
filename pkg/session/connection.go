@@ -50,6 +50,9 @@ var passwordMessageContents = []byte("password: ")
 var emailAddressMessageContents = []byte("email address: ")
 var channelsNameMessageContents = []byte("channel's name: ")
 var channelsDescMessageContents = []byte("channel's desc: ")
+var passwordValidationFailedMessageContents = []byte(CR("password validation failed"))
+var emailAddressValidationFailedMessageContents = []byte(CR("email address validation failed"))
+var usernameValidationFailedMessageContents = []byte(CR("username validation failed"))
 
 type ReaderState int8
 type ReaderSubstate int8

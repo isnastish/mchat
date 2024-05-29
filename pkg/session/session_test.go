@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 
@@ -10,30 +11,44 @@ import (
 	"go.uber.org/goleak"
 )
 
-func TestShutdownSessionIfNobodyConnected(t *testing.T) {
-	defer goleak.VerifyNone(t)
-
-	session := NewSession(config)
-	session.Run()
-
-	assert.EqualValues(t, session.participantsJoined.Load(), 0)
-}
-
 func TestRegisterNewParticipant(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	session := NewSession(config)
 	go client(
 		RegisterParticipant,
-		&config,
-		&participants[0],
+		config,
+		participants[0],
 		func(c net.Conn) bool { c.Close(); return true },
-		func(buf *bytes.Buffer, c net.Conn) bool { return true },
+		nil,
 	)
-	// Session will be disconnected after a timeout set in the config,
-	// thus, there is no need to use WaitGroup to wait for the client goroutine to finish.
 	session.Run()
-	assert.True(t, session.storage.HasParticipant(participants[0].name))
+	assert.True(t, session.storage.HasParticipant(participants[0].username))
+	assert.Equal(t, session.connections.count(), 0)
+}
+
+func TestFailedToValidateUsername(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	invalid_participant := participants[0]
+	invalid_participant.username = "invalid_username#"
+
+	session := NewSession(config)
+	go client(
+		RegisterParticipant,
+		config,
+		invalid_participant,
+		nil,
+		func(buf *bytes.Buffer, c net.Conn) bool {
+			assert.True(t, strings.Contains(buf.String(), string(usernameValidationFailedMessageContents)))
+			c.Close()
+			return true
+		},
+	)
+	session.Run()
+
+	assert.Equal(t, len(session.storage.GetParticipantList()), 0)
+	assert.Equal(t, session.connections.count(), 0)
 }
 
 func TestAuthenticateParticipant(t *testing.T) {
@@ -51,18 +66,18 @@ func TestAuthenticateParticipant(t *testing.T) {
 
 	client(
 		RegisterParticipant,
-		&config,
-		&participants[0],
+		config,
+		participants[0],
 		func(c net.Conn) bool { c.Close(); return true },
-		func(buf *bytes.Buffer, c net.Conn) bool { return true },
+		nil,
 	)
 
 	go func() {
 		client(
 			AuthenticateParticipant,
-			&config,
-			&participants[0],
-			func(c net.Conn) bool { return false },
+			config,
+			participants[0],
+			nil,
 			func(buf *bytes.Buffer, c net.Conn) bool {
 				c.Write([]byte(message))
 				c.Close()
@@ -72,7 +87,7 @@ func TestAuthenticateParticipant(t *testing.T) {
 		wg.Done()
 	}()
 	wg.Wait()
-	assert.True(t, session.storage.HasParticipant(participants[0].name))
+	assert.True(t, session.storage.HasParticipant(participants[0].username))
 
 	chatHistory := session.storage.GetChatHistory()
 

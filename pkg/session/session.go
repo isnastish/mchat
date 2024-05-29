@@ -273,6 +273,8 @@ func (session *Session) handleConnection(conn net.Conn) {
 				reader.participantEmailAddress = reader.buffer.String()
 				session.systemMessagesCh <- backend.MakeSystemMessage(passwordMessageContents, receiver)
 			} else if reader.isSubstate(ProcessingParticipantsPassword) {
+				// TODO(alx): Move validation into a separate function so we don't duplicate
+				// the code in multiple states.
 				validationSucceeded := false
 				if validateName(reader.participantName) {
 					if validateEmailAddress(reader.participantEmailAddress) {
@@ -280,19 +282,19 @@ func (session *Session) handleConnection(conn net.Conn) {
 							validationSucceeded = true
 						} else {
 							session.systemMessagesCh <- backend.MakeSystemMessage(
-								[]byte(CR("password validation failed")),
+								usernameValidationFailedMessageContents,
 								receiver,
 							)
 						}
 					} else {
 						session.systemMessagesCh <- backend.MakeSystemMessage(
-							[]byte(CR("email address validation failed")),
+							emailAddressValidationFailedMessageContents,
 							receiver,
 						)
 					}
 				} else {
 					session.systemMessagesCh <- backend.MakeSystemMessage(
-						[]byte(CR("name validation failed")),
+						passwordValidationFailedMessageContents,
 						receiver,
 					)
 				}
@@ -370,19 +372,21 @@ func (session *Session) handleConnection(conn net.Conn) {
 						validationSucceeded = true
 					} else {
 						session.systemMessagesCh <- backend.MakeSystemMessage(
-							[]byte(CR("password validation failed")),
+							passwordValidationFailedMessageContents,
 							receiver,
 						)
 					}
 				} else {
 					session.systemMessagesCh <- backend.MakeSystemMessage(
-						[]byte(CR("name validation failed")),
+						passwordValidationFailedMessageContents,
 						receiver,
 					)
 				}
 
 				if validationSucceeded {
 					reader.participantPasswordSha256 = Sha256(reader.buffer.Bytes())
+					// TODO(alx): Add hashed password validation.
+
 					if session.storage.AuthParticipant(reader.participantName, reader.participantPasswordSha256) {
 						reader.state = AcceptingMessages
 
