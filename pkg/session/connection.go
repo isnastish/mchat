@@ -11,12 +11,14 @@ import (
 	backend "github.com/isnastish/chat/pkg/session/backend"
 )
 
+type MenuOptionType int8
+
 const (
-	RegisterParticipant     = 0x01
-	AuthenticateParticipant = 0x02
-	CreateChannel           = 0x03
-	SelectChannel           = 0x04
-	Exit                    = 0x05
+	RegisterParticipant     MenuOptionType = 0x01
+	AuthenticateParticipant MenuOptionType = 0x02
+	CreateChannel           MenuOptionType = 0x03
+	SelectChannel           MenuOptionType = 0x04
+	Exit                    MenuOptionType = 0x05
 )
 
 var menuOptionsTable = []string{

@@ -164,7 +164,7 @@ func (session *Session) handleConnection(conn net.Conn) {
 		// NOTE: When an opposite side closes the connection, we read zero bytes.
 		// In that case we have to stop disconnectIfIdle function and
 		// set the state to Disconnecting.
-		if reader.buffer.Len() == 0 {
+		if !reader.isState(Disconnecting) && reader.buffer.Len() == 0 {
 			close(reader.quitSignalCh)
 			reader.state = Disconnecting
 		}
@@ -181,7 +181,7 @@ func (session *Session) handleConnection(conn net.Conn) {
 				continue
 			}
 
-			switch option {
+			switch MenuOptionType(option) {
 			case RegisterParticipant:
 				if !reader.isConnected {
 					logger.Info("registering new participant")
@@ -310,13 +310,6 @@ func (session *Session) handleConnection(conn net.Conn) {
 							},
 						)
 
-						reader.participantPasswordSha256 = Sha256(reader.buffer.Bytes())
-						session.storage.RegisterParticipant(
-							reader.participantName,
-							reader.participantPasswordSha256,
-							reader.participantEmailAddress,
-						)
-
 						// Display a chat history
 						empty, history := buildChatHistory(session)
 						if !empty {
@@ -334,6 +327,15 @@ func (session *Session) handleConnection(conn net.Conn) {
 								receiver,
 							)
 						}
+
+						// NOTE: Register this participant after so that the current participant is not
+						// included into participant list being displayed.
+						reader.participantPasswordSha256 = Sha256(reader.buffer.Bytes())
+						session.storage.RegisterParticipant(
+							reader.participantName,
+							reader.participantPasswordSha256,
+							reader.participantEmailAddress,
+						)
 
 						// Set the state to accept new messages
 						reader.state = AcceptingMessages
@@ -392,6 +394,7 @@ func (session *Session) handleConnection(conn net.Conn) {
 							)
 						}
 
+						// TODO(alx): We should exclude itself from a participant list.
 						empty, participantList := buildParticipantList(session)
 						if !empty {
 							session.systemMessagesCh <- backend.MakeSystemMessage(

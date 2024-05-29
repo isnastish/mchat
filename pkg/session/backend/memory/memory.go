@@ -136,7 +136,7 @@ func (b *MemoryBackend) GetParticipantList() []*backend.Participant {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	participantList := make([]*backend.Participant, len(b.participants))
+	participantList := make([]*backend.Participant, 0, len(b.participants))
 	for _, participant := range b.participants {
 		participantList = append(participantList, participant)
 	}
