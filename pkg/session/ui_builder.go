@@ -7,9 +7,9 @@ import (
 
 func buildMenu(session *Session) string {
 	builder := strings.Builder{}
-	builder.Grow((len(menuOptionsTable) * 64) + 32)
 
-	builder.WriteString("Options:\r\n")
+	builder.Grow((len(menuOptionsTable) * 64) + 32)
+	builder.Write(menuMessageHeader)
 
 	for idx, op := range menuOptionsTable {
 		builder.WriteString(fmt.Sprintf("\t[%d] %s\r\n", idx+1, op))
@@ -27,8 +27,9 @@ func buildChannelList(session *Session) (bool, string) {
 	}
 
 	builder := strings.Builder{}
+
 	builder.Grow((channelsCount * 64) + 64)
-	builder.WriteString("Channels:\r\n")
+	builder.Write(channelsMessageHeader)
 
 	for index, ch := range channels {
 		builder.WriteString(fmt.Sprintf("\t[%d] %s\r\n", index, ch.Name))
@@ -73,9 +74,9 @@ func buildParticipantList(session *Session) (bool, string) {
 	}
 
 	builder := strings.Builder{}
-	builder.Grow((participantsCount * 128) + 64)
 
-	builder.WriteString("Participants:\r\n")
+	builder.Grow((participantsCount * 128) + 64)
+	builder.Write(participantListMessageHeader)
 
 	// Iterate over all the participants in a storage,
 	// check whether they are in a connections map to verify which status to display

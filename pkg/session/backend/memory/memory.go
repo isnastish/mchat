@@ -33,20 +33,23 @@ func (b *MemoryBackend) HasParticipant(username string) bool {
 
 func (b *MemoryBackend) RegisterParticipant(username string, passwordShaw256 string, emailAddress string) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.HasParticipant(username) {
-		b.participants[username] = &backend.Participant{
-			Name:           username,
-			PasswordSha256: passwordShaw256,
-			EmailAddress:   emailAddress,
-			JoinTime:       time.Now().Format(time.DateTime),
-		}
+	_, exists := b.participants[username]
+	if exists {
+		panic("participant already exists")
 	}
+
+	b.participants[username] = &backend.Participant{
+		Name:           username,
+		PasswordSha256: passwordShaw256,
+		EmailAddress:   emailAddress,
+		JoinTime:       time.Now().Format(time.DateTime),
+	}
+	b.mu.Unlock()
 }
 
 func (b *MemoryBackend) AuthParticipant(username string, passwordSha256 string) bool {
 	b.mu.Lock()
-	defer b.mu.Lock()
+	defer b.mu.Unlock()
 	participant, exists := b.participants[username]
 	if exists {
 		return strings.EqualFold(participant.PasswordSha256, passwordSha256)
@@ -133,7 +136,7 @@ func (b *MemoryBackend) GetParticipantList() []*backend.Participant {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	participantList := make([]*backend.Participant, len(b.participants))
+	participantList := make([]*backend.Participant, 0, len(b.participants))
 	for _, participant := range b.participants {
 		participantList = append(participantList, participant)
 	}

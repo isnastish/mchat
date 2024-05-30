@@ -11,3 +11,7 @@ func Sha256(bytes []byte) string {
 	hashString := fmt.Sprintf("%X", h.Sum(nil))
 	return hashString
 }
+
+func CR(src string) string {
+	return src + "\n"
+}

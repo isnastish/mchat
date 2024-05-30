@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"strings"
@@ -10,12 +11,14 @@ import (
 	backend "github.com/isnastish/chat/pkg/session/backend"
 )
 
+type MenuOptionType int8
+
 const (
-	RegisterParticipant     = 0x01
-	AuthenticateParticipant = 0x02
-	CreateChannel           = 0x03
-	SelectChannel           = 0x04
-	Exit                    = 0x05
+	RegisterParticipant     MenuOptionType = 0x01
+	AuthenticateParticipant MenuOptionType = 0x02
+	CreateChannel           MenuOptionType = 0x03
+	SelectChannel           MenuOptionType = 0x04
+	Exit                    MenuOptionType = 0x05
 )
 
 var menuOptionsTable = []string{
@@ -27,7 +30,7 @@ var menuOptionsTable = []string{
 	"Exit",              // Exit the sesssion.
 }
 
-type ConnectionState int32
+type ConnectionState int8
 
 const (
 	Pending   ConnectionState = 0x1
@@ -39,14 +42,20 @@ var connectionStateTable = []string{
 	"online",
 }
 
+var menuMessageHeader = []byte("options:\r\n")
+var channelsMessageHeader = []byte("channels:\r\n")
+var participantListMessageHeader = []byte("participants:\r\n")
 var usernameMessageContents = []byte("username: ")
 var passwordMessageContents = []byte("password: ")
 var emailAddressMessageContents = []byte("email address: ")
 var channelsNameMessageContents = []byte("channel's name: ")
 var channelsDescMessageContents = []byte("channel's desc: ")
+var passwordValidationFailedMessageContents = []byte(CR("password validation failed"))
+var emailAddressValidationFailedMessageContents = []byte(CR("email address validation failed"))
+var usernameValidationFailedMessageContents = []byte(CR("username validation failed"))
 
-type ReaderState int32
-type ReaderSubstate int32
+type ReaderState int8
+type ReaderSubstate int8
 
 // TODO(alx): Combine listing channels and selecting channels all together.
 // SelectChannels will list all available channels and wait for the input.
@@ -71,14 +80,46 @@ const (
 	ProcessingParticipantsPassword     ReaderSubstate = 0x02
 	ProcessingParticipantsEmailAddress ReaderSubstate = 0x03
 	ProcessingChannelsDesc             ReaderSubstate = 0x04
+
+	ProcessingNumber ReaderSubstate = 0x05
 )
+
+// type State struct {
+// 	state     ReaderState
+// 	substate  ReaderSubstate
+// 	validated bool
+// }
+
+// // In most of the cases one state is not enought, we need an additional data to determine which state transition to make.
+// var reader_transition_table = map[State]State{
+// 	State{state: ProcessingMenu, substate: NotSet}: State{state: RegisteringNewParticipant, substate: ProcessingName},
+// 	State{state: ProcessingMenu, substate: NotSet}: State{state: AuthenticatingParticipant, substate: ProcessingName},
+// 	State{state: ProcessingMenu, substate: NotSet}: State{state: CreatingNewChannel, substate: ProcessingName},
+// 	State{state: ProcessingMenu, substate: NotSet}: State{state: SelectingChannel, substate: ProcessingNumber},
+// 	State{state: ProcessingMenu, substate: NotSet}: State{state: Disconnecting, substate: NotSet},
+
+// 	State{state: RegisteringNewParticipant, substate: ProcessingName}:                                   State{state: RegisteringNewParticipant, substate: ProcessingParticipantsEmailAddress},
+// 	State{state: RegisteringNewParticipant, substate: ProcessingParticipantsEmailAddress}:               State{state: RegisteringNewParticipant, substate: ProcessingParticipantsPassword},
+// 	State{state: RegisteringNewParticipant, substate: ProcessingParticipantsPassword, validated: true}:  State{state: AcceptingMessages, substate: NotSet},
+// 	State{state: RegisteringNewParticipant, substate: ProcessingParticipantsPassword, validated: false}: State{state: ProcessingMenu, substate: NotSet}, // if the validation fails, transition back to processing the menu
+
+// 	State{state: AuthenticatingParticipant, substate: ProcessingName}:                                   State{state: AuthenticatingParticipant, substate: ProcessingParticipantsPassword},
+// 	State{state: AuthenticatingParticipant, substate: ProcessingParticipantsPassword, validated: true}:  State{state: AcceptingMessages, substate: NotSet},
+// 	State{state: AuthenticatingParticipant, substate: ProcessingParticipantsPassword, validated: false}: State{state: ProcessingMenu, substate: NotSet}, // if the validation fails, transition back to processing the menu
+
+// 	State{state: CreatingNewChannel, substate: ProcessingName, validated: true}:  State{state: CreatingNewChannel, substate: ProcessingChannelsDesc},
+// 	State{state: CreatingNewChannel, substate: ProcessingName, validated: false}: State{state: ProcessingMenu, substate: NotSet},
+// 	State{state: CreatingNewChannel, substate: ProcessingChannelsDesc}:           State{state: AcceptingMessages, substate: NotSet},
+
+// 	State{state: SelectingChannel, substate: ProcessingNumber, validated: true}: State{state: }
+// }
 
 type Connection struct {
 	conn   net.Conn
 	ipAddr string
 
 	// TODO(alx): Document in the architecture.md file that a participant only
-	// present when the state is Connect.
+	// present when the state is Connected.
 	state       ConnectionState
 	participant *backend.Participant
 }
@@ -173,14 +214,12 @@ type Reader struct {
 	quitSignalCh      chan struct{}
 
 	// Buffer for storing bytes read from a connection.
-	buffer []byte
-
-	// TODO(alx): Replace string(s) with []byte arrays?
+	buffer *bytes.Buffer
 
 	// Placeholders for participant's data.
-	participantsName           string
-	participantsPasswordSha256 string
-	participantsEmailAddress   string
+	participantName           string
+	participantEmailAddress   string
+	participantPasswordSha256 string
 
 	// Set to true if a participant was auathenticated or registered successfully.
 	isConnected bool
@@ -201,7 +240,6 @@ func newReader(conn net.Conn, connIpAddr string, connectionTimeout time.Duration
 		idleConnectionsCh: make(chan struct{}),
 		abortSignalCh:     make(chan struct{}),
 		quitSignalCh:      make(chan struct{}),
-		buffer:            make([]byte, 0, 1024),
 	}
 }
 
@@ -232,23 +270,13 @@ func (reader *Reader) disconnectIfIdle() {
 	}
 }
 
-type ReadResult struct {
-	bytesRead int32
-	asBytes   []byte
-	asStr     string
-	err       error
-}
+func (reader *Reader) read() error {
+	buffer := make([]byte, 1024)
+	bytesRead, err := reader.conn.Read(buffer)
+	trimmedBuffer := []byte(strings.Trim(string(buffer[:bytesRead]), " \r\n\v\t\f"))
+	reader.buffer = bytes.NewBuffer(trimmedBuffer)
 
-func (reader *Reader) read() ReadResult {
-	bytesRead, err := reader.conn.Read(reader.buffer)
-	str := strings.Trim(string(reader.buffer[:bytesRead]), " \\t\\r\\n\\v\\f")
-
-	return ReadResult{
-		bytesRead: int32(bytesRead),
-		asBytes:   reader.buffer[:bytesRead],
-		asStr:     str,
-		err:       err,
-	}
+	return err
 }
 
 func (connMap *ConnectionMap) broadcastParticipantMessage(message *backend.ParticipantMessage) (int32, int32) {

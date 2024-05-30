@@ -37,7 +37,7 @@ func validateName(name string) bool {
 }
 
 func validateEmailAddress(emailAddress string) bool {
-	// TODO(alx): Handle quoted email addresses.
+	// TODO(alx): Handle quoted email addresses?
 
 	// Reference: https: //en.wikipedia.org/wiki/Email_address
 	// Local-part
@@ -102,4 +102,11 @@ func validateEmailAddress(emailAddress string) bool {
 	}
 
 	return true
+}
+
+func validatePasswordSha256(sha256 string) bool {
+	// A password hashed with sha256 algorithm should only contain hexdigits uppercase characters.
+	// [0-9A-F] with the length of 64
+	re := regexp.MustCompile("^[0-9A-F]+$")
+	return len(sha256) == 64 && re.MatchString(sha256)
 }

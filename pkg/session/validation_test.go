@@ -1,9 +1,8 @@
 package session
 
 import (
-	"testing"
-
 	"github.com/stretchr/testify/assert"
+	"testing"
 )
 
 func TestValidatePassword(t *testing.T) {
@@ -19,11 +18,13 @@ func TestValidatePassword(t *testing.T) {
 	assert.False(t, validatePassword("password2348"))
 	assert.False(t, validatePassword("ThisPa2swordExceeeeeedsTheAllowedAmountOfCharacters"))
 	assert.False(t, validatePassword(".a"))
+	assert.False(t, validateName("")) // too short
 
 	// valid passwords
 	assert.True(t, validatePassword("Afdsf988#@Nasayer"))
 	assert.True(t, validatePassword("2344NewYear@lone"))
 	assert.True(t, validatePassword("NeverAgain1999#"))
+	assert.True(t, validateName("a")) // valid username, a single character
 }
 
 func TestValidateName(t *testing.T) {
@@ -34,6 +35,7 @@ func TestValidateName(t *testing.T) {
 	assert.False(t, validateName("Contains-***InvalidSymbols@"))
 	assert.False(t, validateName("NameIsTooLong23449988AndExceeeedsTheDesiredSizeOf32Symbols"))
 	assert.False(t, validateName("A.1"))
+	assert.False(t, validateName("invalid_username#"))
 
 	// valid names
 	assert.True(t, validateName("Hadson24499"))
@@ -75,4 +77,25 @@ func TestValidateEmailAddress(t *testing.T) {
 	// "@example.org (space between the quotes)
 	// "john..doe"@example.org (quoted double dot)
 	// "very.(),:;<>[]\".VERY.\"very@\\ \"very\".unusual"@strange.example.com (include non-letters character AND multiple at sign, the first one being double quoted)
+}
+
+func TestValidateHashedPassword(t *testing.T) {
+	// Python code used to generate hexidecimal sequences
+	// random.choices(hexdigits.upper(), k=64).join()
+	// "".join(random.choices(hexdigits.upper(), k=64))
+
+	// invalid passwords
+	assert.False(t, validatePasswordSha256("***#*2344"))
+	assert.False(t, validatePasswordSha256("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFT"))
+	assert.False(t, validatePasswordSha256("0123456789ABCDEFABCDEF"))                                                                                                           // too short
+	assert.False(t, validatePasswordSha256("58EF14F177F26B2A12F16EA4FBFFFBC4FBB9E2ACC0EAFA8F11699E4EE324AA1FEB3A8A7A6A5BCADB3E24DB14882CB3D2CDD8E8DBBE02D1550DA9FDA9DED3E669")) // too long
+	assert.False(t, validatePasswordSha256("C2161G0622EA40C42CFBCD7B9E1E57CC4CB26C520C722AE9BFB4BC2AF84BCDA5"))                                                                 // contains invalid character
+
+	// valid hashed passwords
+	assert.True(t, validatePasswordSha256(Sha256([]byte("some_bytes_here"))))
+	assert.True(t, validatePasswordSha256(Sha256([]byte("4orYouWillDoe5erThings@"))))
+	assert.True(t, validatePasswordSha256("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"))
+	assert.True(t, validatePasswordSha256("0000000000000000000000000000000000000000000000000000000000000000"))
+	assert.True(t, validatePasswordSha256("9BBAFAEEA0E53711CD6C123ADBDAC236957143E306ADC37B4A1C15E6B1CBD0A3"))
+	assert.True(t, validatePasswordSha256("8274686282364632478430390097840070974254933463363963475973583772"))
 }

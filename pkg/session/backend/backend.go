@@ -40,7 +40,7 @@ type Participant struct {
 type IMessage interface{}
 
 type ParticipantMessage struct {
-	Contents []byte
+	Contents []byte // could be a bytes.Buffer as well?
 	Sender   string
 	Time     string
 	Channel  string
