@@ -282,7 +282,7 @@ func (session *Session) handleConnection(conn net.Conn) {
 							validationSucceeded = true
 						} else {
 							session.systemMessagesCh <- backend.MakeSystemMessage(
-								usernameValidationFailedMessageContents,
+								passwordValidationFailedMessageContents,
 								receiver,
 							)
 						}
@@ -294,7 +294,7 @@ func (session *Session) handleConnection(conn net.Conn) {
 					}
 				} else {
 					session.systemMessagesCh <- backend.MakeSystemMessage(
-						passwordValidationFailedMessageContents,
+						usernameValidationFailedMessageContents,
 						receiver,
 					)
 				}
@@ -378,7 +378,7 @@ func (session *Session) handleConnection(conn net.Conn) {
 					}
 				} else {
 					session.systemMessagesCh <- backend.MakeSystemMessage(
-						passwordValidationFailedMessageContents,
+						usernameValidationFailedMessageContents,
 						receiver,
 					)
 				}

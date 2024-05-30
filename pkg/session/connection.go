@@ -80,7 +80,39 @@ const (
 	ProcessingParticipantsPassword     ReaderSubstate = 0x02
 	ProcessingParticipantsEmailAddress ReaderSubstate = 0x03
 	ProcessingChannelsDesc             ReaderSubstate = 0x04
+
+	ProcessingNumber ReaderSubstate = 0x05
 )
+
+// type State struct {
+// 	state     ReaderState
+// 	substate  ReaderSubstate
+// 	validated bool
+// }
+
+// // In most of the cases one state is not enought, we need an additional data to determine which state transition to make.
+// var reader_transition_table = map[State]State{
+// 	State{state: ProcessingMenu, substate: NotSet}: State{state: RegisteringNewParticipant, substate: ProcessingName},
+// 	State{state: ProcessingMenu, substate: NotSet}: State{state: AuthenticatingParticipant, substate: ProcessingName},
+// 	State{state: ProcessingMenu, substate: NotSet}: State{state: CreatingNewChannel, substate: ProcessingName},
+// 	State{state: ProcessingMenu, substate: NotSet}: State{state: SelectingChannel, substate: ProcessingNumber},
+// 	State{state: ProcessingMenu, substate: NotSet}: State{state: Disconnecting, substate: NotSet},
+
+// 	State{state: RegisteringNewParticipant, substate: ProcessingName}:                                   State{state: RegisteringNewParticipant, substate: ProcessingParticipantsEmailAddress},
+// 	State{state: RegisteringNewParticipant, substate: ProcessingParticipantsEmailAddress}:               State{state: RegisteringNewParticipant, substate: ProcessingParticipantsPassword},
+// 	State{state: RegisteringNewParticipant, substate: ProcessingParticipantsPassword, validated: true}:  State{state: AcceptingMessages, substate: NotSet},
+// 	State{state: RegisteringNewParticipant, substate: ProcessingParticipantsPassword, validated: false}: State{state: ProcessingMenu, substate: NotSet}, // if the validation fails, transition back to processing the menu
+
+// 	State{state: AuthenticatingParticipant, substate: ProcessingName}:                                   State{state: AuthenticatingParticipant, substate: ProcessingParticipantsPassword},
+// 	State{state: AuthenticatingParticipant, substate: ProcessingParticipantsPassword, validated: true}:  State{state: AcceptingMessages, substate: NotSet},
+// 	State{state: AuthenticatingParticipant, substate: ProcessingParticipantsPassword, validated: false}: State{state: ProcessingMenu, substate: NotSet}, // if the validation fails, transition back to processing the menu
+
+// 	State{state: CreatingNewChannel, substate: ProcessingName, validated: true}:  State{state: CreatingNewChannel, substate: ProcessingChannelsDesc},
+// 	State{state: CreatingNewChannel, substate: ProcessingName, validated: false}: State{state: ProcessingMenu, substate: NotSet},
+// 	State{state: CreatingNewChannel, substate: ProcessingChannelsDesc}:           State{state: AcceptingMessages, substate: NotSet},
+
+// 	State{state: SelectingChannel, substate: ProcessingNumber, validated: true}: State{state: }
+// }
 
 type Connection struct {
 	conn   net.Conn

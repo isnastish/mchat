@@ -18,7 +18,8 @@ func TestRegisterNewParticipant(t *testing.T) {
 	go client(
 		RegisterParticipant,
 		config,
-		participants[0],
+		&participants[0],
+		nil,
 		func(c net.Conn) bool { c.Close(); return true },
 		nil,
 	)
@@ -27,28 +28,51 @@ func TestRegisterNewParticipant(t *testing.T) {
 	assert.Equal(t, session.connections.count(), 0)
 }
 
-func TestFailedToValidateUsername(t *testing.T) {
+func TestFailedToValidateCredentials(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	invalid_participant := participants[0]
-	invalid_participant.username = "invalid_username#"
-
 	session := NewSession(config)
-	go client(
-		RegisterParticipant,
-		config,
-		invalid_participant,
-		nil,
-		func(buf *bytes.Buffer, c net.Conn) bool {
-			assert.True(t, strings.Contains(buf.String(), string(usernameValidationFailedMessageContents)))
-			c.Close()
-			return true
-		},
-	)
-	session.Run()
+	for i := 0; i < 3; i++ {
+		invalid_participant := participants[0]
+		if i == 0 {
+			invalid_participant.username = "#this_is_an_invalid_username#"
+		} else if i == 1 {
+			invalid_participant.emailAddress = "#this_email_address@_@_is_invalid"
+		} else {
+			invalid_participant.password = "this_password_is_invalid"
+		}
 
+		index := i
+
+		go client(
+			RegisterParticipant,
+			config,
+			&invalid_participant,
+			nil,
+			nil,
+			func(buf *bytes.Buffer, c net.Conn) bool {
+				if index == 0 {
+					assert.True(t, strings.Contains(buf.String(), string(usernameValidationFailedMessageContents)))
+				} else if index == 1 {
+					assert.True(t, strings.Contains(buf.String(), string(emailAddressValidationFailedMessageContents)))
+				} else {
+					assert.True(t, strings.Contains(buf.String(), string(passwordValidationFailedMessageContents)))
+				}
+				c.Close()
+				return true
+			},
+		)
+	}
+	session.Run()
 	assert.Equal(t, len(session.storage.GetParticipantList()), 0)
 	assert.Equal(t, session.connections.count(), 0)
+}
+
+func TestChannelCreation(t *testing.T) {
+	// NOTE(alx): Creating channels is not supported yet, since the client has to be registered,
+	// or authenticated in order to have the rights to create channels.
+	// And we haven't agreed on the command to invoke the menu either (probably :menu)
+	defer goleak.VerifyNone(t)
 }
 
 func TestAuthenticateParticipant(t *testing.T) {
@@ -67,7 +91,8 @@ func TestAuthenticateParticipant(t *testing.T) {
 	client(
 		RegisterParticipant,
 		config,
-		participants[0],
+		&participants[0],
+		nil,
 		func(c net.Conn) bool { c.Close(); return true },
 		nil,
 	)
@@ -76,7 +101,8 @@ func TestAuthenticateParticipant(t *testing.T) {
 		client(
 			AuthenticateParticipant,
 			config,
-			participants[0],
+			&participants[0],
+			nil,
 			nil,
 			func(buf *bytes.Buffer, c net.Conn) bool {
 				c.Write([]byte(message))

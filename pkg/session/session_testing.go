@@ -14,6 +14,11 @@ type test_participant struct {
 	emailAddress string
 }
 
+type test_channel struct {
+	name string
+	desc string
+}
+
 var participants = []test_participant{
 	{"IvanIvanov", "ThisIsI1sPassw0rd@", "example@gmail.com"},
 	{"MarkLutz", "Some_other_password@234", "mark@mail.ru"},
@@ -35,7 +40,8 @@ var config = SessionConfig{
 
 func client(menuOption MenuOptionType,
 	config SessionConfig,
-	participant test_participant,
+	participant *test_participant,
+	channel *test_channel,
 	onPasswordSubmittedCallback func(net.Conn) bool,
 	onAcceptingMessagesCallback func(*bytes.Buffer, net.Conn) bool) {
 
@@ -53,25 +59,37 @@ func client(menuOption MenuOptionType,
 	if err != nil {
 		return
 	}
+
 	for {
-		buf := bytes.NewBuffer(make([]byte, 256))
+		buf := bytes.NewBuffer(make([]byte, 1024))
 		bytesRead, err := conn.Read(buf.Bytes())
 		if err != nil || bytesRead == 0 {
 			return
 		}
 
-		if strings.Contains(buf.String(), string(menuMessageHeader)) {
+		switch {
+		case strings.Contains(buf.String(), string(menuMessageHeader)):
 			conn.Write([]byte(strconv.Itoa(int(menuOption))))
-		} else if strings.Contains(buf.String(), string(usernameMessageContents)) {
+
+		case strings.Contains(buf.String(), string(usernameMessageContents)):
 			conn.Write([]byte(participant.username))
-		} else if strings.Contains(buf.String(), string(emailAddressMessageContents)) {
+
+		case strings.Contains(buf.String(), string(emailAddressMessageContents)):
 			conn.Write([]byte(participant.emailAddress))
-		} else if strings.Contains(buf.String(), string(passwordMessageContents)) {
+
+		case strings.Contains(buf.String(), string(passwordMessageContents)):
 			conn.Write([]byte(participant.password))
 			if onPasswordSubmittedCallback(conn) {
 				return
 			}
-		} else {
+
+		case strings.Contains(buf.String(), string(channelsNameMessageContents)):
+			conn.Write([]byte(channel.name))
+
+		case strings.Contains(buf.String(), string(channelsDescMessageContents)):
+			conn.Write([]byte(channel.desc))
+
+		default:
 			if onAcceptingMessagesCallback(buf, conn) {
 				return
 			}
