@@ -1,12 +1,10 @@
 package session
 
 import (
-	_ "crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"strconv"
-	"sync/atomic"
 	"time"
 
 	lgr "github.com/isnastish/chat/pkg/logger"
@@ -22,6 +20,15 @@ type SessionConfig struct {
 	BackendType backend.BackendType
 	Timeout     time.Duration
 }
+
+type metrics struct {
+	joined           int32
+	left             int32
+	receivedMessages int32
+	sentMessages     int32
+	droppedMessages  int32
+}
+
 type Session struct {
 	connections           *ConnectionMap
 	timeoutClock          *time.Timer
@@ -34,13 +41,7 @@ type Session struct {
 	quitCh                chan struct{}
 	storage               backend.Backend
 	config                SessionConfig
-
-	// metrics
-	participantsJoined             atomic.Int32
-	participantsLeft               atomic.Int32
-	receivedParticipantMessages    atomic.Int32
-	broadcastedParticipantMessages atomic.Int32
-	droppedParticipantMessages     atomic.Int32
+	m                     metrics
 }
 
 var logger = lgr.NewLogger("debug")
@@ -71,8 +72,10 @@ func NewSession(config SessionConfig) *Session {
 
 	switch config.BackendType {
 	case backend.BackendTypeRedis:
-		session.storage = redis.NewBackend()
-
+		rb, err := redis.NewRedisBackend("127.0.0.1:6379")
+		if err != nil {
+			session.storage = rb
+		}
 	case backend.BackendTypeDynamoDB:
 		session.storage = dynamodb.NewBackend()
 
@@ -123,8 +126,7 @@ Loop:
 }
 
 func (session *Session) handleConnection(conn net.Conn) {
-	// update the metrics
-	session.participantsJoined.Add(1)
+	session.m.joined++
 
 	connIpAddr := conn.RemoteAddr().String()
 
@@ -443,7 +445,7 @@ func (session *Session) handleConnection(conn net.Conn) {
 				)
 			}
 
-			session.receivedParticipantMessages.Add(1)
+			session.m.receivedMessages++
 
 		} else if reader.isState(CreatingNewChannel) {
 			// TODO(alx): What if the channel has already been created?
@@ -539,7 +541,7 @@ func (session *Session) handleConnection(conn net.Conn) {
 
 	// since this participant has disconnected, decrement the number of
 	// connected participants
-	session.participantsLeft.Add(1)
+	session.m.left++
 
 	// reset session's timeout timer if the amount of connected participants went back to zero
 	if session.connections.count() == 0 {
@@ -555,8 +557,8 @@ func (session *Session) processMessages() {
 			logger.Info("broadcasting participant's message")
 
 			dropped, broadcasted := session.connections.broadcastParticipantMessage(message)
-			session.broadcastedParticipantMessages.Add(broadcasted)
-			session.droppedParticipantMessages.Add(dropped)
+			session.m.sentMessages += broadcasted
+			session.m.droppedMessages += dropped
 
 		case message := <-session.systemMessagesCh:
 			logger.Info("broadcasting system message")

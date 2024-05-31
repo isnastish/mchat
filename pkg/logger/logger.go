@@ -11,8 +11,7 @@ import (
 type Logger struct {
 	level      string
 	zeroLogger zerolog.Logger
-
-	disabled bool
+	disabled   bool
 }
 
 func setLogLevel(logLevel string) error {

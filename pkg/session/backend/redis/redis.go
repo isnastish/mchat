@@ -11,51 +11,44 @@ import (
 
 type RedisBackend struct {
 	client *redis.Client
-	// every redis command uses context to set a timeout or to propagate tracing information
-	// using prometheus or grafana
-	ctx context.Context
-	mu  sync.Mutex
+	ctx    context.Context
+	mu     sync.Mutex
 }
 
-// type participant struct {
-// 	username       string `redis:"username"`
-// 	passwordSha256 string `redis:"passwordSha256"`
-// 	emailAddress   string `redis:"emailAddress"`
-// 	joinTime       string `redis:"joinTime"`
-// }
-
-func NewBackend() *RedisBackend {
-	client := redis.NewClient(&redis.Options{
-		Addr:     "127.0.0.1:6379",
+func NewRedisBackend(addr string) (*RedisBackend, error) {
+	options := &redis.Options{
+		Addr:     addr,
 		Password: "",
 		DB:       0,
-	})
+	}
 
-	return &RedisBackend{
+	client := redis.NewClient(options)
+
+	rb := &RedisBackend{
 		client: client,
 		ctx:    context.Background(),
 	}
+
+	return rb, nil
 }
 
 func (redis *RedisBackend) HasParticipant(username string) bool {
 	return false
 }
 
-func (redis *RedisBackend) RegisterParticipant(username string, passwordShaw256 string, emailAddress string) {
-	redis.mu.Lock()
+func (r *RedisBackend) RegisterParticipant(username string, passwordShaw256 string, emailAddress string) {
+	r.mu.Lock()
 
-	// STRINGs, LISTs, SETs, HASHes, and ZSETs.
-
-	redis.client.HSet(
-		redis.ctx,
+	r.client.HSet(
+		r.ctx,
 		username,
 		[]string{username, passwordShaw256, emailAddress, time.Now().Format(time.DateTime)},
 	)
 
-	data := redis.client.HGetAll(redis.ctx, username)
+	data := r.client.HGetAll(r.ctx, username)
 	_ = data
 
-	redis.mu.Unlock()
+	r.mu.Unlock()
 }
 
 func (b *RedisBackend) AuthParticipant(username string, passwordSha256 string) bool {
