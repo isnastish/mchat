@@ -1,4 +1,4 @@
-package dbbackend
+package backend
 
 import "time"
 
@@ -37,6 +37,16 @@ type Participant struct {
 	JoinTime       string
 }
 
+type Channel struct {
+	Name         string
+	Desc         string
+	CreationDate string
+	Owner        string
+
+	ChatHistory  []*ParticipantMessage
+	Participants []*Participant
+}
+
 type IMessage interface{}
 
 type ParticipantMessage struct {
@@ -70,14 +80,6 @@ func MakeParticipantMessage(contents []byte, sender string, channel ...string) *
 		m.Channel = channel[0]
 	}
 	return m
-}
-
-type Channel struct {
-	Name         string
-	Desc         string
-	CreationDate string
-	ChatHistory  []*ParticipantMessage
-	Participants []*Participant
 }
 
 // NOTE(alx): All of these function has to be replaced with RPS(s)

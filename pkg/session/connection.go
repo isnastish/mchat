@@ -90,7 +90,7 @@ const (
 // 	validated bool
 // }
 
-// // In most of the cases one state is not enought, we need an additional data to determine which state transition to make.
+// In most of the cases one state is not enought, we need an additional data to determine which state transition to make.
 // var reader_transition_table = map[State]State{
 // 	State{state: ProcessingMenu, substate: NotSet}: State{state: RegisteringNewParticipant, substate: ProcessingName},
 // 	State{state: ProcessingMenu, substate: NotSet}: State{state: AuthenticatingParticipant, substate: ProcessingName},

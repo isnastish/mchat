@@ -10,10 +10,10 @@ import (
 	"time"
 
 	lgr "github.com/isnastish/chat/pkg/logger"
-	backend "github.com/isnastish/chat/pkg/session/backend"
-	dynamodb "github.com/isnastish/chat/pkg/session/backend/dynamodb"
-	memory "github.com/isnastish/chat/pkg/session/backend/memory"
-	redis "github.com/isnastish/chat/pkg/session/backend/redis"
+	"github.com/isnastish/chat/pkg/session/backend"
+	"github.com/isnastish/chat/pkg/session/backend/dynamodb"
+	"github.com/isnastish/chat/pkg/session/backend/memory"
+	"github.com/isnastish/chat/pkg/session/backend/redis"
 )
 
 type SessionConfig struct {
@@ -22,7 +22,6 @@ type SessionConfig struct {
 	BackendType backend.BackendType
 	Timeout     time.Duration
 }
-
 type Session struct {
 	connections           *ConnectionMap
 	timeoutClock          *time.Timer
@@ -78,10 +77,10 @@ func NewSession(config SessionConfig) *Session {
 		session.storage = dynamodb.NewBackend()
 
 	case backend.BackendTypeMemory:
-		session.storage = memory.NewBackend()
+		session.storage = memory.NewMemoryBackend()
 
 	default:
-		session.storage = memory.NewBackend()
+		session.storage = memory.NewMemoryBackend()
 	}
 
 	return session

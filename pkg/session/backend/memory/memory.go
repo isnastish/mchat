@@ -16,7 +16,7 @@ type MemoryBackend struct {
 	mu                 sync.Mutex
 }
 
-func NewBackend() *MemoryBackend {
+func NewMemoryBackend() *MemoryBackend {
 	return &MemoryBackend{
 		participants:       make(map[string]*backend.Participant),
 		channels:           make(map[string]*backend.Channel),
@@ -24,18 +24,28 @@ func NewBackend() *MemoryBackend {
 	}
 }
 
-func (b *MemoryBackend) HasParticipant(username string) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+func (b *MemoryBackend) doesParticipantExist(username string) bool {
 	_, exists := b.participants[username]
 	return exists
 }
 
-func (b *MemoryBackend) RegisterParticipant(username string, passwordShaw256 string, emailAddress string) {
+func (b *MemoryBackend) doesChannelExist(channelName string) bool {
+	_, exists := b.channels[channelName]
+	return exists
+}
+
+func (b *MemoryBackend) HasParticipant(username string) bool {
 	b.mu.Lock()
-	_, exists := b.participants[username]
-	if exists {
-		panic("participant already exists")
+	defer b.mu.Unlock()
+	return b.doesParticipantExist(username)
+}
+
+func (b *MemoryBackend) RegisterParticipant(username string, passwordShaw256 string, emailAddress string) {
+	// TODO(alx): Do the password sha256 validation here instead of session.
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.doesParticipantExist(username) {
+		panic(fmt.Sprintf("participant {%s} already exists", username))
 	}
 
 	b.participants[username] = &backend.Participant{
@@ -44,7 +54,6 @@ func (b *MemoryBackend) RegisterParticipant(username string, passwordShaw256 str
 		EmailAddress:   emailAddress,
 		JoinTime:       time.Now().Format(time.DateTime),
 	}
-	b.mu.Unlock()
 }
 
 func (b *MemoryBackend) AuthParticipant(username string, passwordSha256 string) bool {
@@ -82,16 +91,17 @@ func (b *MemoryBackend) StoreMessage(senderName string, sentTime string, content
 func (b *MemoryBackend) HasChannel(channelName string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	_, exists := b.channels[channelName]
-	return exists
+	return b.doesChannelExist(channelName)
 }
 
 func (b *MemoryBackend) RegisterChannel(channelName string, desc string, ownerName string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.HasChannel(channelName) {
+
+	if b.doesChannelExist(channelName) {
 		panic(fmt.Sprintf("channel {%s} already exists", channelName))
 	}
+
 	b.channels[channelName] = &backend.Channel{
 		Name:         channelName,
 		Desc:         desc,
@@ -105,7 +115,7 @@ func (b *MemoryBackend) DeleteChannel(channelName string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.channels, channelName)
-	return b.HasChannel(channelName)
+	return b.doesChannelExist(channelName)
 }
 
 func (b *MemoryBackend) GetChatHistory(channelName ...string) []*backend.ParticipantMessage {
@@ -125,10 +135,13 @@ func (b *MemoryBackend) GetChatHistory(channelName ...string) []*backend.Partici
 func (b *MemoryBackend) GetChannels() []*backend.Channel {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	channels := make([]*backend.Channel, len(b.channels))
+
+	cap := len(b.channels)
+	channels := make([]*backend.Channel, 0, cap)
 	for _, ch := range b.channels {
 		channels = append(channels, ch)
 	}
+
 	return channels
 }
 
@@ -136,10 +149,11 @@ func (b *MemoryBackend) GetParticipantList() []*backend.Participant {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	participantList := make([]*backend.Participant, 0, len(b.participants))
+	cap := len(b.participants)
+	plist := make([]*backend.Participant, 0, cap)
 	for _, participant := range b.participants {
-		participantList = append(participantList, participant)
+		plist = append(plist, participant)
 	}
 
-	return participantList
+	return plist
 }

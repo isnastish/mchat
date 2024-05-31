@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"sync"
+	"time"
 
 	backend "github.com/isnastish/chat/pkg/session/backend"
 	"github.com/redis/go-redis/v9"
@@ -10,21 +11,51 @@ import (
 
 type RedisBackend struct {
 	client *redis.Client
-	ctx    context.Context
-	mu     sync.Mutex
+	// every redis command uses context to set a timeout or to propagate tracing information
+	// using prometheus or grafana
+	ctx context.Context
+	mu  sync.Mutex
 }
+
+// type participant struct {
+// 	username       string `redis:"username"`
+// 	passwordSha256 string `redis:"passwordSha256"`
+// 	emailAddress   string `redis:"emailAddress"`
+// 	joinTime       string `redis:"joinTime"`
+// }
 
 func NewBackend() *RedisBackend {
+	client := redis.NewClient(&redis.Options{
+		Addr:     "127.0.0.1:6379",
+		Password: "",
+		DB:       0,
+	})
 
-	return &RedisBackend{}
+	return &RedisBackend{
+		client: client,
+		ctx:    context.Background(),
+	}
 }
 
-func (b *RedisBackend) HasParticipant(username string) bool {
+func (redis *RedisBackend) HasParticipant(username string) bool {
 	return false
 }
 
-func (b *RedisBackend) RegisterParticipant(username string, passwordShaw256 string, emailAddress string) {
+func (redis *RedisBackend) RegisterParticipant(username string, passwordShaw256 string, emailAddress string) {
+	redis.mu.Lock()
 
+	// STRINGs, LISTs, SETs, HASHes, and ZSETs.
+
+	redis.client.HSet(
+		redis.ctx,
+		username,
+		[]string{username, passwordShaw256, emailAddress, time.Now().Format(time.DateTime)},
+	)
+
+	data := redis.client.HGetAll(redis.ctx, username)
+	_ = data
+
+	redis.mu.Unlock()
 }
 
 func (b *RedisBackend) AuthParticipant(username string, passwordSha256 string) bool {
