@@ -9,30 +9,57 @@ import (
 	"strings"
 	"time"
 
-	lgr "github.com/isnastish/chat/pkg/logger"
+	"github.com/isnastish/chat/pkg/logger"
 )
+
+type MenuOptionType int8
+
+const (
+	RegisterParticipant     MenuOptionType = 0x01
+	AuthenticateParticipant MenuOptionType = 0x02
+	CreateChannel           MenuOptionType = 0x03
+	SelectChannel           MenuOptionType = 0x04
+	Exit                    MenuOptionType = 0x05
+)
+
+var menuOptionsTable = []string{
+	"Register",          // Register a new participant.
+	"Log in",            // Authenticate an already registered participant.
+	"Create channel",    // Create a new channel.
+	"Select channels",   // Select a channel for writing messages.
+	"List participants", // List all participants
+	"Exit",              // Exit the sesssion.
+}
+
+var menuMessageHeader = []byte("options:\r\n")
+var channelsMessageHeader = []byte("channels:\r\n")
+var participantListMessageHeader = []byte("participants:\r\n")
+var usernameMessageContents = []byte("username: ")
+var passwordMessageContents = []byte("password: ")
+var emailAddressMessageContents = []byte("email address: ")
+var channelsNameMessageContents = []byte("channel's name: ")
+var channelsDescMessageContents = []byte("channel's desc: ")
+
+var passwordValidationFailedMessageContents = []byte("password validation failed")
+var emailAddressValidationFailedMessageContents = []byte("email address validation failed")
+var usernameValidationFailedMessageContents = []byte("username validation failed")
 
 const retriesCount int32 = 5
 
-// Pull out in a separate package shared by both, client and a server?
 type Message struct {
 	data []byte
 }
 
-type Client struct {
-	remoteConn net.Conn
-	network    string
-	address    string
-
-	quitCh chan struct{}
-
+type client struct {
+	remoteConn  net.Conn
+	network     string
+	address     string
+	quitCh      chan struct{}
 	incommingCh chan Message
 	outgoingCh  chan Message
 }
 
-var log = lgr.NewLogger("debug")
-
-func NewClient(network, address string) (*Client, error) {
+func CreateClient(network, address string) (*client, error) {
 	var remoteConn net.Conn
 	var nretries int32
 	var lastErr error
@@ -41,10 +68,10 @@ func NewClient(network, address string) (*Client, error) {
 		remoteConn, lastErr = net.Dial(network, address)
 		if lastErr != nil {
 			nretries++
-			log.Info("connection failed, retrying...")
+			log.Logger.Warn("connection failed, retrying...")
 			time.Sleep(3000 * time.Millisecond)
 		} else {
-			log.Info("connected to remote session: %s", remoteConn.RemoteAddr().String())
+			log.Logger.Info("connected to remote session: %s", remoteConn.RemoteAddr().String())
 			break
 		}
 	}
@@ -53,21 +80,19 @@ func NewClient(network, address string) (*Client, error) {
 		return nil, lastErr
 	}
 
-	c := Client{
-		network:    network,
-		address:    address,
-		remoteConn: remoteConn,
-
-		quitCh: make(chan struct{}),
-
+	c := &client{
+		network:     network,
+		address:     address,
+		remoteConn:  remoteConn,
+		quitCh:      make(chan struct{}),
 		incommingCh: make(chan Message),
 		outgoingCh:  make(chan Message),
 	}
 
-	return &c, nil
+	return c, nil
 }
 
-func (c *Client) Run() {
+func (c *client) Run() {
 	go c.recv()
 	go c.send()
 
@@ -85,7 +110,7 @@ Loop:
 			for bytesWritten < messageSize {
 				n, err := c.remoteConn.Write(msg.data[bytesWritten:])
 				if err != nil {
-					log.Error("failed to write to a remote connection: %s", err.Error())
+					log.Logger.Error("failed to write to a remote connection: %s", err.Error())
 					break
 				}
 				bytesWritten += n
@@ -105,42 +130,37 @@ Loop:
 	c.remoteConn.Close()
 }
 
-func (c *Client) recv() {
-	buf := make([]byte, 4096)
-
+func (c *client) recv() {
 	for {
+		buf := make([]byte, 4096)
 		nbytes, err := c.remoteConn.Read(buf)
 		if err != nil && err != io.EOF {
-			log.Error("failed to read from the remote connnection: %s", err.Error())
+			log.Logger.Error("failed to read from the remote connnection: %s", err.Error())
 			c.remoteConn.Close()
 			close(c.quitCh)
 			break
 		}
 
 		if nbytes == 0 {
-			log.Info("remote session closed the connection")
+			log.Logger.Error("remote session closed the connection")
 			close(c.quitCh)
 			return
 		}
-
-		// log.Info().Msgf("%s", string(buf[:nBytes]))
-		// c.incommingCh <- buf[:nBytes]
-
 		c.incommingCh <- Message{data: buf[:nbytes]}
 	}
 }
 
-func (c *Client) send() {
+func (c *client) send() {
 	buf := make([]byte, 4096)
 	inputReader := bufio.NewReader(os.Stdin)
 
 	for {
 		bytesRead, err := inputReader.Read(buf)
 		if err != nil && err != io.EOF {
-			log.Error("failed to read the input")
+			log.Logger.Error("failed to read the input")
 			break
 		}
 
-		c.outgoingCh <- Message{data: []byte(strings.Trim(string(buf[:bytesRead]), " \\r\\n\\t\\f\\v"))}
+		c.outgoingCh <- Message{data: []byte(strings.Trim(string(buf[:bytesRead]), " \r\n\t\f\v"))}
 	}
 }

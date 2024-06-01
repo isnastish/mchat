@@ -6,10 +6,17 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/goleak"
 )
+
+var config = SessionConfig{
+	Network: "tcp",
+	Addr:    "127.0.0.1:5000",
+	Timeout: 2 * time.Second,
+}
 
 func TestRegisterNewParticipant(t *testing.T) {
 	defer goleak.VerifyNone(t)
@@ -120,71 +127,3 @@ func TestAuthenticateParticipant(t *testing.T) {
 	assert.Equal(t, len(chatHistory), 1)
 	assert.Equal(t, chatHistory[0].Contents, message)
 }
-
-/*func TestRegisterNewClient(t *testing.T) {
-	defer goleak.VerifyNone(t)
-
-	doneCh := make(chan struct{})
-	s := NewSession(config)
-	go func() {
-		s.Run()
-		close(doneCh)
-	}()
-	createClient(t, config.Network, config.Addr, clients[0], func(input string, conn net.Conn) bool {
-		conn.Close()
-		return true
-	}, false)
-	<-doneCh
-	assert.True(t, s.backend.HasParticipant(clients[0].name))
-}
-
-func TestRegisterMultipeNewClients(t *testing.T) {
-	defer goleak.VerifyNone(t)
-
-	doneCh := make(chan struct{})
-	s := NewSession(config)
-	go func() {
-		s.Run()
-		close(doneCh)
-	}()
-
-	for _, client := range clients {
-		c := client
-		go createClient(t, config.Network, config.Addr, c, func(input string, conn net.Conn) bool {
-			conn.Close()
-			return true
-		}, false)
-	}
-	<-doneCh
-
-	for _, client := range clients {
-		assert.True(t, s.backend.HasParticipant(client.name))
-	}
-}
-
-func TestSecondClientReceivedMessages(t *testing.T) {
-	defer goleak.VerifyNone(t)
-	message := "hello!"
-
-	doneCh := make(chan struct{})
-	s := NewSession(config)
-	go func() {
-		s.Run()
-		close(doneCh)
-	}()
-	go createClient(t, config.Network, config.Addr, clients[0], func(input string, conn net.Conn) bool {
-		time.Sleep(100 * time.Millisecond) // Do we need to sleep?
-		conn.Write([]byte(message))
-		conn.Close()
-		return true
-	}, false)
-
-	go createClient(t, config.Network, config.Addr, clients[1], func(input string, conn net.Conn) bool {
-		assert.True(t, strings.Contains(input, message))
-		conn.Close()
-		return true
-	}, true)
-
-	<-doneCh
-}
-*/

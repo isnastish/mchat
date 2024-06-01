@@ -6,14 +6,17 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/isnastish/chat/pkg/backend"
 	"github.com/isnastish/chat/pkg/session"
-	backend "github.com/isnastish/chat/pkg/session/backend"
 )
 
 func main() {
-	config := session.SessionConfig{}
+	var config session.Config
 	config.Timeout = 15 * time.Second
 
+	// TODO: Specify backend as a command-line argument.
+	// Every config (for redis/dynamodb backends) should be passed to CreateSessio,
+	// so need append the corresponding fields to SessionConfig struct
 	flag.StringVar(&config.Network, "network", "tcp", "network protocol (tcp|udp)")
 	flag.StringVar(&config.Addr, "address", ":5000", "address to listen in")
 
@@ -26,6 +29,6 @@ func main() {
 		config.BackendType = backend.BackendTypeRedis
 	}
 
-	s := session.NewSession(config)
+	s := session.CreateSession(config)
 	s.Run()
 }

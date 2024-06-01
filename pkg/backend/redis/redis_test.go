@@ -1,34 +1,31 @@
 package redis
 
 import (
-	_ "github.com/stretchr/testify/assert"
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/isnastish/chat/pkg/testsetup"
 )
 
 func TestMain(m *testing.M) {
 	var result int
 	var redisHasStarted bool
+
 	defer func() {
 		if redisHasStarted {
-			teardownRedisMock()
+			testsetup.TeardownRedisMock()
 		}
 		os.Exit(result)
 	}()
 
-	redisHasStarted, _ = setupRedisMock()
-	if redisHasStarted {
-		teardownRedisMock()
-	}
-
+	redisHasStarted, _ = testsetup.SetupRedisMock()
 	result = m.Run()
 }
 
 func TestRegisterParticipant(t *testing.T) {
 	rb, err := NewRedisBackend("127.0.0.1:6379")
-	if err != nil {
-		return
-	}
-
+	assert.True(t, err == nil)
 	_ = rb
 }

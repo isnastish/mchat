@@ -4,17 +4,19 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"time"
 
-	lgr "github.com/isnastish/chat/pkg/logger"
-	"github.com/isnastish/chat/pkg/session/backend"
-	"github.com/isnastish/chat/pkg/session/backend/dynamodb"
-	"github.com/isnastish/chat/pkg/session/backend/memory"
-	"github.com/isnastish/chat/pkg/session/backend/redis"
+	"github.com/isnastish/chat/pkg/backend"
+	"github.com/isnastish/chat/pkg/backend/dynamodb"
+	"github.com/isnastish/chat/pkg/backend/memory"
+	"github.com/isnastish/chat/pkg/backend/redis"
+	"github.com/isnastish/chat/pkg/logger"
+	"github.com/isnastish/chat/pkg/types"
 )
 
-type SessionConfig struct {
+type Config struct {
 	Network     string // tcp|udp
 	Addr        string
 	BackendType backend.BackendType
@@ -22,90 +24,94 @@ type SessionConfig struct {
 }
 
 type metrics struct {
-	joined           int32
-	left             int32
-	receivedMessages int32
-	sentMessages     int32
-	droppedMessages  int32
+	joined                  int
+	left                    int
+	receivedChatMessages    int
+	broadcastedChatMessages int
+	sentSysMessages         int
 }
 
-type Session struct {
-	connections           *ConnectionMap
-	timeoutClock          *time.Timer
-	timeoutDuration       time.Duration
-	timeoutAbortCh        chan struct{}
-	listener              net.Listener
-	participantMessagesCh chan *backend.ParticipantMessage
-	systemMessagesCh      chan *backend.SystemMessage
-	running               bool
-	quitCh                chan struct{}
-	storage               backend.Backend
-	config                SessionConfig
-	m                     metrics
+type session struct {
+	config           Config
+	listener         net.Listener
+	connections      *connectionMap
+	timeoutClock     *time.Timer
+	timeoutDuration  time.Duration
+	timeoutAbortChan chan struct{}
+	chatMessagesChan chan *types.ChatMessage
+	sysMessagesChan  chan *types.SysMessage
+	quitChan         chan struct{}
+	storage          backend.Backend
+	metrics          metrics
+	running          bool
 }
 
-var logger = lgr.NewLogger("debug")
-
-func NewSession(config SessionConfig) *Session {
-	// TODO(alx): Implement tls security layer.
+func CreateSession(config Config) *session {
 	listener, err := net.Listen(config.Network, config.Addr)
 	if err != nil {
-		logger.Error("failed to created a listener: %v", err.Error())
-		return nil
+		log.Logger.Error("Listener creation failed: %v", err)
+		os.Exit(1)
 	}
 
 	if config.Timeout == 0 {
 		config.Timeout = 86400 * time.Second // 24h
 	}
 
-	session := &Session{
-		connections:           newConnectionMap(),
-		timeoutClock:          time.NewTimer(config.Timeout),
-		timeoutDuration:       config.Timeout,
-		timeoutAbortCh:        make(chan struct{}),
-		listener:              listener,
-		participantMessagesCh: make(chan *backend.ParticipantMessage),
-		systemMessagesCh:      make(chan *backend.SystemMessage),
-		quitCh:                make(chan struct{}),
-		config:                config,
-	}
+	var storage backend.Backend
 
 	switch config.BackendType {
 	case backend.BackendTypeRedis:
-		rb, err := redis.NewRedisBackend("127.0.0.1:6379")
+		storage, err = redis.NewRedisBackend("127.0.0.1:6379")
 		if err != nil {
-			session.storage = rb
+			log.Logger.Error("Failed to initialize redis backend: %s", err)
+			os.Exit(1)
 		}
-	case backend.BackendTypeDynamoDB:
-		session.storage = dynamodb.NewBackend()
+		log.Logger.Info("Using redis backend")
+
+	case backend.BackendTypeDynamodb:
+		storage, err = dynamodb.NewDynamodbBackend()
+		if err != nil {
+			log.Logger.Error("Failed to initialize dynamodb backend: %s", err)
+			os.Exit(1)
+		}
+		log.Logger.Info("Using dynamodb backend")
 
 	case backend.BackendTypeMemory:
-		session.storage = memory.NewMemoryBackend()
+		storage = memory.NewMemoryBackend()
+		log.Logger.Info("Using memory backend")
+	}
 
-	default:
-		session.storage = memory.NewMemoryBackend()
+	session := &session{
+		connections:      newConnectionMap(),
+		timeoutClock:     time.NewTimer(config.Timeout),
+		timeoutDuration:  config.Timeout,
+		timeoutAbortChan: make(chan struct{}),
+		listener:         listener,
+		chatMessagesChan: make(chan *types.ChatMessage),
+		sysMessagesChan:  make(chan *types.SysMessage),
+		quitChan:         make(chan struct{}),
+		config:           config,
+		storage:          storage,
 	}
 
 	return session
 }
 
-func (session *Session) Run() {
-	go session.processMessages()
-
+func (s *session) Run() {
+	go s.processMessages()
 	go func() {
-		<-session.timeoutAbortCh
-		close(session.quitCh)
-		session.listener.Close()
+		<-s.timeoutAbortChan
+		close(s.quitChan)
+		s.listener.Close()
 	}()
-
-	logger.Info("listening: %s", session.listener.Addr().String())
+	log.Logger.Info("Listening: %s", s.listener.Addr().String())
 
 Loop:
 	for {
-		conn, err := session.listener.Accept()
+		conn, err := s.listener.Accept()
 		if err != nil {
 			select {
-			case <-session.quitCh:
+			case <-s.quitChan:
 				logger.Info("no participants connected, shutting down the session")
 				// terminate the session if no participants connected
 				// for the whole timeout duration.
@@ -549,30 +555,27 @@ func (session *Session) handleConnection(conn net.Conn) {
 	}
 }
 
-func (session *Session) processMessages() {
-	session.running = true
-	for session.running {
+func (s *session) processMessages() {
+	s.running = true
+	for s.running {
 		select {
-		case message := <-session.participantMessagesCh:
-			logger.Info("broadcasting participant's message")
+		case message := <-s.chatMessagesChan:
+			log.Logger.Info("Broadcasting participant's message")
 
-			dropped, broadcasted := session.connections.broadcastParticipantMessage(message)
-			session.m.sentMessages += broadcasted
-			session.m.droppedMessages += dropped
+			broadcasted := s.connections.broadcastMessage(message, types.ChatMessageType)
+			s.metrics.broadcastedChatMessages += broadcasted
 
-		case message := <-session.systemMessagesCh:
-			logger.Info("broadcasting system message")
+		case message := <-s.sysMessagesChan:
+			log.Logger.Info("Broadcasting system message")
 
-			droppedCount, sentCount := session.connections.broadcastSystemMessage(message)
-			// NOTE: Not sure whether we need to track down the amount of system messages we sent.
-			_ = droppedCount
-			_ = sentCount
+			sent := s.connections.broadcastMessage(message, types.SysMessageType)
+			s.metrics.sentSysMessages = sent
 
-		case <-session.timeoutClock.C:
-			logger.Info("session timeout")
+		case <-s.timeoutClock.C:
+			log.Logger.Info("Session timeout")
 
-			session.running = false
-			close(session.timeoutAbortCh)
+			s.running = false
+			close(s.timeoutAbortChan)
 		}
 	}
 }
