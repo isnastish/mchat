@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -60,5 +61,42 @@ func TestStoreMessage(t *testing.T) {
 }
 
 func TestGetChannelHistory(t *testing.T) {
+	storage := NewMemoryBackend()
 
+	for _, ch := range testsetup.Channels {
+		storage.RegisterChannel(&ch)
+		assert.True(t, storage.HasChannel(ch.Name))
+	}
+	for _, msg := range testsetup.BooksChannelMessages {
+		storage.StoreMessage(&msg)
+	}
+	for _, msg := range testsetup.ProgrammingChannelMessages {
+		storage.StoreMessage(&msg)
+	}
+
+	assert.Equal(t, len(storage.GetChatHistory()), 0)
+
+	booksChanHistory := storage.GetChannelHistory(testsetup.Channels[0].Name)
+	assert.Equal(t, len(booksChanHistory), len(testsetup.BooksChannelMessages))
+	for i := 0; i < len(booksChanHistory); i++ {
+		assert.Equal(t,
+			bytes.Compare(
+				booksChanHistory[i].Contents.Bytes(),
+				testsetup.BooksChannelMessages[i].Contents.Bytes(),
+			),
+			0,
+		)
+	}
+
+	programmingChanHistory := storage.GetChannelHistory(testsetup.Channels[1].Name)
+	assert.Equal(t, len(programmingChanHistory), len(testsetup.ProgrammingChannelMessages))
+	for i := 0; i < len(programmingChanHistory); i++ {
+		assert.Equal(t,
+			bytes.Compare(
+				programmingChanHistory[i].Contents.Bytes(),
+				testsetup.ProgrammingChannelMessages[i].Contents.Bytes(),
+			),
+			0,
+		)
+	}
 }

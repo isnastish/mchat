@@ -14,3 +14,10 @@ func Sha256Checksum(bytes []byte) string {
 func Cr(builder *strings.Builder) {
 	builder.WriteString("\r\n")
 }
+
+// func Message(msgstr string) *bytes.Buffer {
+// 	msgsize := len(msgstr)
+// 	buf := bytes.NewBuffer(make([]byte, msgsize+2)) // for \r\n
+// 	buf.WriteString(msgstr)
+// 	return buf
+// }

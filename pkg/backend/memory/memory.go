@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"bytes"
 	"strings"
 	"sync"
 
@@ -60,6 +61,8 @@ func (m *MemoryBackend) RegisterParticipant(participant *types.Participant) {
 		Email:    participant.Email,
 		JoinTime: participant.JoinTime,
 	}
+
+	log.Logger.Info("Registered %s participant", participant.Username)
 }
 
 func (m *MemoryBackend) AuthParticipant(participant *types.Participant) bool {
@@ -77,16 +80,26 @@ func (m *MemoryBackend) AuthParticipant(participant *types.Participant) bool {
 
 func (m *MemoryBackend) StoreMessage(message *types.ChatMessage) {
 	m.mu.Lock()
-	defer m.mu.Unlock() // deferred in case of panic
+	defer m.mu.Unlock()
+
+	msg := &types.ChatMessage{
+		Contents: bytes.NewBuffer(bytes.Clone(message.Contents.Bytes())),
+		Sender:   message.Sender,
+		Channel:  message.Channel,
+		Time:     message.Time,
+	}
 
 	if message.Channel != "" {
 		channel, exists := m.channels[message.Channel]
 		if !exists {
 			log.Logger.Panic("Failed to store a message, channel %s doesn't exist", message.Channel)
 		}
-		channel.ChatHistory = append(channel.ChatHistory, message)
+
+		channel.ChatHistory = append(channel.ChatHistory, msg)
+		log.Logger.Info("Added messages to %s channel", channel.Name)
 	} else {
-		m.chatHistory = append(m.chatHistory, message)
+		m.chatHistory = append(m.chatHistory, msg)
+		log.Logger.Info("Added message to general channel")
 	}
 }
 
@@ -112,6 +125,8 @@ func (m *MemoryBackend) RegisterChannel(channel *types.Channel) {
 		ChatHistory:  make([]*types.ChatMessage, 0, 1024),
 		Members:      make([]*types.Participant, 0),
 	}
+
+	log.Logger.Info("Registered %s channel", channel.Name)
 }
 
 func (m *MemoryBackend) DeleteChannel(channelname string) bool {
@@ -121,6 +136,9 @@ func (m *MemoryBackend) DeleteChannel(channelname string) bool {
 		log.Logger.Panic("Deletion failed, channel %s doesn't exist", channelname)
 	}
 	delete(m.channels, channelname)
+
+	log.Logger.Info("Deleted %s channel", channelname)
+
 	return true
 }
 
