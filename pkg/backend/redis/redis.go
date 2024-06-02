@@ -1,6 +1,7 @@
 // TODO: Figure out how to persist the data if the redis server gets of.
 // Maybe the data should be replicated on disk after each operation: RegisterParticipant/Channel etc.
 // TODO: Implement metrics using prometheus or grafana.
+// TODO: Explore Redis' transactions, maybe we wouldn't have to maintain a mutex.
 // NOTE: redis.Del(r.ctx, key) - deletes the hash itself
 package redis
 
@@ -46,6 +47,11 @@ func (r *RedisBackend) doesParticipantExist(participantHash string) bool {
 	return len(result.Val()) != 0
 }
 
+func (r *RedisBackend) doesChannelExist(channelHash string) bool {
+	result := r.client.HGetAll(r.ctx, channelHash)
+	return len(result.Val()) != 0
+}
+
 func (r *RedisBackend) HasParticipant(username string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -75,6 +81,7 @@ func (r *RedisBackend) RegisterParticipant(participant *types.Participant) {
 		// If that changes, the code breaks. Cannot think of more general solution
 		// of how to solve this problem (inserting only hashed paswords).
 		// This relies on the order of fields inside types.Participant, not on their names itself.
+		// Maybe the best way to solve it would be to use tags.
 		if i == 1 {
 			fieldvalue = passwordHash
 		}
@@ -89,7 +96,8 @@ func (r *RedisBackend) RegisterParticipant(participant *types.Participant) {
 	}
 }
 
-func (r *RedisBackend) DeleteParticipant(participant *types.Participant) {
+// NOTE: Not a part of a public API yet.
+func (r *RedisBackend) deleteParticipant(participant *types.Participant) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -124,13 +132,53 @@ func (r *RedisBackend) StoreMessage(message *types.ChatMessage) {
 }
 
 func (r *RedisBackend) HasChannel(channelname string) bool {
-	return false
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	channelHash := utilities.Sha256Checksum([]byte(channelname))
+	return r.doesChannelExist(channelHash)
 }
 
 func (r *RedisBackend) RegisterChannel(channel *types.Channel) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	channelHash := utilities.Sha256Checksum([]byte(channel.Name))
+	if r.doesChannelExist(channelHash) {
+		log.Logger.Panic("Channel %s already exists", channel.Name)
+	}
+
+	value := reflect.ValueOf(channel).Elem()
+	for i := 0; i < value.NumField(); i++ {
+		// Skip chat history and members for now
+		if value.Field(i).Type() == reflect.TypeOf(channel.ChatHistory) ||
+			value.Field(i).Type() == reflect.TypeOf(channel.Members) {
+			continue
+		}
+
+		fieldname := value.Type().Field(i).Name
+		fieldvalue := value.Field(i).Interface()
+
+		r.client.HSet(r.ctx, channelHash, fieldname, fieldvalue)
+	}
+
+	if r.doesChannelExist(channelHash) {
+		log.Logger.Info("Registered %s channel", channel.Name)
+	} else {
+		log.Logger.Info("Failed to register channel %s", channel.Name)
+	}
 }
 
 func (r *RedisBackend) DeleteChannel(channelname string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	channelHash := utilities.Sha256Checksum([]byte(channelname))
+	if r.doesChannelExist(channelHash) {
+		r.client.Del(r.ctx, channelHash)
+		log.Logger.Info("Channel %s was deleted", channelname)
+	}
+
 	return false
 }
 

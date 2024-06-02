@@ -29,4 +29,6 @@ type Backend interface {
 	GetChannelHistory(channelname string) []*types.ChatMessage
 	GetChannels() []*types.Channel
 	GetParticipantList() []*types.Participant
+
+	// ChanelAddMember(channelname string, member string)
 }

@@ -44,7 +44,7 @@ type Channel struct {
 	Creator      string
 	CreationDate time.Time
 	ChatHistory  []*ChatMessage
-	Members      []*Participant
+	Members      []string
 }
 
 type RedisConfig struct {

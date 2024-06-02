@@ -123,7 +123,7 @@ func (m *MemoryBackend) RegisterChannel(channel *types.Channel) {
 		Creator:      channel.Creator,
 		CreationDate: channel.CreationDate,
 		ChatHistory:  make([]*types.ChatMessage, 0, 1024),
-		Members:      make([]*types.Participant, 0),
+		Members:      make([]string, 0, 1024),
 	}
 
 	log.Logger.Info("Registered %s channel", channel.Name)
