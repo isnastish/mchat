@@ -7,6 +7,7 @@ package redis
 import (
 	"context"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/redis/go-redis/v9"
@@ -45,14 +46,6 @@ func (r *RedisBackend) doesParticipantExist(participantHash string) bool {
 	return len(result.Val()) != 0
 }
 
-// func (r *RedisBackend) deleteParticipant(participantHash string, participant *types.Participant) {
-// 	value := reflect.ValueOf(participant).Elem()
-// 	for i := 0; i < value.NumField(); i++ {
-// 		fieldname := value.Type().Field(i).Name
-// 		r.client.HDel(r.ctx, participantHash, fieldname)
-// 	}
-// }
-
 func (r *RedisBackend) HasParticipant(username string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -68,13 +61,23 @@ func (r *RedisBackend) RegisterParticipant(participant *types.Participant) {
 		log.Logger.Panic("Failed to register participant %s. Password validation failed", participant.Username)
 	}
 
-	// Should we validate participant's hash?
 	participantHash := utilities.Sha256Checksum([]byte(participant.Username))
+
+	if r.doesParticipantExist(participantHash) {
+		log.Logger.Panic("Participant %s already exists", participant.Username)
+	}
 
 	value := reflect.ValueOf(participant).Elem()
 	for i := 0; i < value.NumField(); i++ {
 		fieldname := value.Type().Field(i).Name
 		fieldvalue := value.Field(i).Interface()
+		// NOTE: This has to be in sync with types.Participant Password field.
+		// If that changes, the code breaks. Cannot think of more general solution
+		// of how to solve this problem (inserting only hashed paswords).
+		// This relies on the order of fields inside types.Participant, not on their names itself.
+		if i == 1 {
+			fieldvalue = passwordHash
+		}
 
 		r.client.HSet(r.ctx, participantHash, fieldname, fieldvalue)
 	}
@@ -86,23 +89,32 @@ func (r *RedisBackend) RegisterParticipant(participant *types.Participant) {
 	}
 }
 
+func (r *RedisBackend) DeleteParticipant(participant *types.Participant) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	participantHash := utilities.Sha256Checksum([]byte(participant.Username))
+	if r.doesParticipantExist(participantHash) {
+		r.client.Del(r.ctx, participantHash)
+		log.Logger.Info("Participant %s was deleted", participant.Username)
+	}
+}
+
 func (r *RedisBackend) AuthParticipant(participant *types.Participant) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// participantHash := utilities.Sha256Checksum([]byte(participant.Username))
+	participantHash := utilities.Sha256Checksum([]byte(participant.Username))
 
-	// passwordHash := utilities.Sha256Checksum([]byte(participant.Password))
-	// return strings.EqualFold(participant.Password, passwordHash)
-
-	// TODO: Verify if Val() is an empty string.
-	// if r.doesParticipantExist(participantHash) {
-	// 	passwordFiledName := reflect.ValueOf(participant.Password).Type().Name()
-	// 	password := r.client.HGet(r.ctx, participantHash, passwordFiledName)
-	// 	if password.Val() != "" {
-
-	// 	}
-	// }
+	if r.doesParticipantExist(participantHash) {
+		// NOTE: This has to be in sync with types.Participant struct because it relies on the order of fields.
+		// Field(1) is expected to correspond to the Password field inside that struct.
+		passwordFiledName := reflect.TypeOf(participant).Elem().Field(1).Name
+		passwordHash := r.client.HGet(r.ctx, participantHash, passwordFiledName)
+		if passwordHash.Val() != "" {
+			return strings.EqualFold(utilities.Sha256Checksum([]byte(participant.Password)), passwordHash.Val())
+		}
+	}
 
 	return false
 }
