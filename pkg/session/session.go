@@ -34,7 +34,7 @@ type metrics struct {
 type session struct {
 	config           Config
 	listener         net.Listener
-	connections      *connectionMap
+	connMap          *connectionMap
 	timeoutClock     *time.Timer
 	timeoutDuration  time.Duration
 	timeoutAbortChan chan struct{}
@@ -82,7 +82,7 @@ func CreateSession(config Config) *session {
 	}
 
 	session := &session{
-		connections:      newConnectionMap(),
+		connMap:          newConnectionMap(),
 		timeoutClock:     time.NewTimer(config.Timeout),
 		timeoutDuration:  config.Timeout,
 		timeoutAbortChan: make(chan struct{}),
@@ -111,40 +111,37 @@ Loop:
 		conn, err := s.listener.Accept()
 		if err != nil {
 			select {
+			// terminate the session if no participants connected
+			// for the whole timeout duration.
 			case <-s.quitChan:
-				logger.Info("no participants connected, shutting down the session")
-				// terminate the session if no participants connected
-				// for the whole timeout duration.
+				log.Logger.Info("Session shut down")
 				break Loop
 			default:
-				logger.Warn(
-					"client failed to connect: %s",
-					conn.RemoteAddr().String(),
-				)
+				log.Logger.Warn("Connection %s aborted", conn.RemoteAddr().String())
 			}
 			continue
 		}
 
-		go session.handleConnection(conn)
+		log.Logger.Info("Connected: %s", conn.RemoteAddr().String())
 
-		session.timeoutClock.Stop()
+		s.connMap.addConn(&connection{
+			conn:        conn,
+			ipAddr:      conn.RemoteAddr().String(),
+			state:       Pending,
+			participant: nil,
+		})
+
+		go s.handleConnection(conn)
+		s.timeoutClock.Stop()
 	}
 }
 
-func (session *Session) handleConnection(conn net.Conn) {
+func (s *session) handleConnection(conn net.Conn) {
 	session.m.joined++
 
 	connIpAddr := conn.RemoteAddr().String()
 
 	receiver := []string{connIpAddr}
-
-	// create a connection
-	session.connections.addConn(&Connection{
-		conn:        conn,
-		ipAddr:      connIpAddr,
-		state:       Pending,
-		participant: nil,
-	})
 
 	// create a new reader(FSM) to handle all the input read from a connection
 	reader := newReader(conn, connIpAddr, time.Second*60*24)
