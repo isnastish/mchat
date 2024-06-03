@@ -30,9 +30,18 @@ func TestMain(m *testing.M) {
 
 var redisEndpoint = "127.0.0.1:6379"
 
-func contains(participants []*types.Participant, username string) bool {
+func containsParticipant(participants []*types.Participant, username string) bool {
 	for _, p := range participants {
 		if strings.EqualFold(p.Username, username) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsChannel(channels []*types.Channel, channelname string) bool {
+	for _, p := range channels {
+		if strings.EqualFold(p.Name, channelname) {
 			return true
 		}
 	}
@@ -57,7 +66,7 @@ func TestRegisterParticipant(t *testing.T) {
 	participants := backend.GetParticipants()
 	assert.Equal(t, len(testsetup.Participants), len(participants))
 	for _, p := range testsetup.Participants {
-		assert.True(t, contains(participants, p.Username))
+		assert.True(t, containsParticipant(participants, p.Username))
 	}
 }
 
@@ -95,6 +104,9 @@ func TestRegisterChannel(t *testing.T) {
 
 	channels := backend.GetChannels()
 	assert.Equal(t, len(channels), len(testsetup.Channels))
+	for _, ch := range testsetup.Channels {
+		assert.True(t, containsChannel(channels, ch.Name))
+	}
 }
 
 func TestChannelAlreadyExists(t *testing.T) {
