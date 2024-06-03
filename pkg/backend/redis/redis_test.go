@@ -42,6 +42,10 @@ func TestRegisterParticipant(t *testing.T) {
 		backend.RegisterParticipant(&p)
 		assert.True(t, backend.HasParticipant(p.Username))
 	}
+
+	// TODO: Check that the data of each participant matches as well.
+	participants := backend.GetParticipantList()
+	assert.Equal(t, len(testsetup.Participants), len(participants))
 }
 
 func TestParticipantAlreadyExists(t *testing.T) {

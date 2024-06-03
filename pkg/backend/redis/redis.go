@@ -2,7 +2,9 @@
 // Maybe the data should be replicated on disk after each operation: RegisterParticipant/Channel etc.
 // TODO: Implement metrics using prometheus or grafana.
 // TODO: Explore Redis' transactions, maybe we wouldn't have to maintain a mutex.
-// NOTE: redis.Del(r.ctx, key) - deletes the hash itself
+// NOTE: A hash key has to be known, because we won't be able to get neither participant list nor
+// channel list.
+
 package redis
 
 import (
@@ -10,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 
@@ -42,9 +45,9 @@ func NewRedisBackend(addr string) (*RedisBackend, error) {
 	return rb, nil
 }
 
-func (r *RedisBackend) doesParticipantExist(participantHash string) bool {
-	result := r.client.HGetAll(r.ctx, participantHash)
-	return len(result.Val()) != 0
+func (r *RedisBackend) doesParticipantExist(participantUsername string) bool {
+	isMember := r.client.SIsMember(r.ctx, "participants:", participantUsername)
+	return isMember.Val()
 }
 
 func (r *RedisBackend) doesChannelExist(channelHash string) bool {
@@ -55,7 +58,7 @@ func (r *RedisBackend) doesChannelExist(channelHash string) bool {
 func (r *RedisBackend) HasParticipant(username string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.doesParticipantExist(utilities.Sha256Checksum([]byte(username)))
+	return r.doesParticipantExist(username)
 }
 
 func (r *RedisBackend) RegisterParticipant(participant *types.Participant) {
@@ -67,11 +70,12 @@ func (r *RedisBackend) RegisterParticipant(participant *types.Participant) {
 		log.Logger.Panic("Failed to register participant %s. Password validation failed", participant.Username)
 	}
 
-	participantHash := utilities.Sha256Checksum([]byte(participant.Username))
-
-	if r.doesParticipantExist(participantHash) {
+	if r.doesParticipantExist(participant.Username) {
 		log.Logger.Panic("Participant %s already exists", participant.Username)
 	}
+
+	// Not sure whether we need to hash a participant's username in order to use it as a key.
+	participantHash := utilities.Sha256Checksum([]byte(participant.Username))
 
 	value := reflect.ValueOf(participant).Elem()
 	for i := 0; i < value.NumField(); i++ {
@@ -89,8 +93,12 @@ func (r *RedisBackend) RegisterParticipant(participant *types.Participant) {
 		r.client.HSet(r.ctx, participantHash, fieldname, fieldvalue)
 	}
 
-	if r.doesParticipantExist(participantHash) {
+	if len(r.client.HGetAll(r.ctx, participantHash).Val()) != 0 {
+		r.client.SAdd(r.ctx, "participants:", participant.Username)
 		log.Logger.Info("Registered %s participant", participant.Username)
+
+		members := r.client.SMembers(r.ctx, "participants:")
+		log.Logger.Info("members: %v", members.Val())
 	} else {
 		log.Logger.Info("Failed to register participant %s", participant.Username)
 	}
@@ -101,9 +109,11 @@ func (r *RedisBackend) deleteParticipant(participant *types.Participant) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	participantHash := utilities.Sha256Checksum([]byte(participant.Username))
-	if r.doesParticipantExist(participantHash) {
+	if r.doesParticipantExist(participant.Username) {
+		r.client.SRem(r.ctx, "participants:", participant.Username)
+		participantHash := utilities.Sha256Checksum([]byte(participant.Username))
 		r.client.Del(r.ctx, participantHash)
+
 		log.Logger.Info("Participant %s was deleted", participant.Username)
 	}
 }
@@ -195,5 +205,39 @@ func (r *RedisBackend) GetChannels() []*types.Channel {
 }
 
 func (r *RedisBackend) GetParticipantList() []*types.Participant {
-	return nil
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// TODO: Figure out how to use redis transactions in order to speed up the performance
+	// (reduce the amount of calls to the redis server)
+	members := r.client.SMembers(r.ctx, "participants:")
+	participants := make([]*types.Participant, 0, len(members.Val()))
+
+	for _, participantUsername := range members.Val() {
+		participantHash := utilities.Sha256Checksum([]byte(participantUsername))
+
+		data := r.client.HGetAll(r.ctx, participantHash)
+		if len(data.Val()) == 0 {
+			log.Logger.Panic("Participant %s not found", participantUsername)
+		}
+
+		participant := &types.Participant{}
+
+		value := reflect.ValueOf(participant).Elem()
+		for i := 0; i < value.NumField(); i++ {
+			fieldname := value.Type().Field(i).Name
+			if value.Field(i).CanSet() {
+				if value.Field(i).Type() == reflect.TypeOf(participant.JoinTime) {
+					value.Field(i).Set(reflect.ValueOf(time.Now()))
+					continue
+				}
+				value.Field(i).Set(reflect.ValueOf(data.Val()[fieldname]))
+			}
+		}
+		participant = (*types.Participant)(value.Addr().UnsafePointer())
+
+		participants = append(participants, participant)
+	}
+
+	return participants
 }
