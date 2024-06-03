@@ -82,6 +82,6 @@ func (d *DynamodbBackend) GetChannels() []*types.Channel {
 	return nil
 }
 
-func (d *DynamodbBackend) GetParticipantList() []*types.Participant {
+func (d *DynamodbBackend) GetParticipants() []*types.Participant {
 	return nil
 }

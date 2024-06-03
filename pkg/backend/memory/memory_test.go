@@ -16,7 +16,7 @@ func TestRegisterParticipant(t *testing.T) {
 		assert.True(t, storage.HasParticipant(p.Username))
 	}
 	assert.Panics(t, func() { storage.RegisterParticipant(&testsetup.Participants[0]) })
-	partList := storage.GetParticipantList()
+	partList := storage.GetParticipants()
 	assert.Equal(t, len(partList), len(testsetup.Participants))
 }
 

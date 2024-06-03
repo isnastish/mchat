@@ -2,11 +2,13 @@ package redis
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/isnastish/chat/pkg/testsetup"
+	"github.com/isnastish/chat/pkg/types"
 )
 
 func TestMain(m *testing.M) {
@@ -28,6 +30,15 @@ func TestMain(m *testing.M) {
 
 var redisEndpoint = "127.0.0.1:6379"
 
+func contains(participants []*types.Participant, username string) bool {
+	for _, p := range participants {
+		if strings.EqualFold(p.Username, username) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRegisterParticipant(t *testing.T) {
 	backend, err := NewRedisBackend(redisEndpoint)
 	assert.True(t, err == nil)
@@ -43,9 +54,11 @@ func TestRegisterParticipant(t *testing.T) {
 		assert.True(t, backend.HasParticipant(p.Username))
 	}
 
-	// TODO: Check that the data of each participant matches as well.
-	participants := backend.GetParticipantList()
+	participants := backend.GetParticipants()
 	assert.Equal(t, len(testsetup.Participants), len(participants))
+	for _, p := range testsetup.Participants {
+		assert.True(t, contains(participants, p.Username))
+	}
 }
 
 func TestParticipantAlreadyExists(t *testing.T) {
@@ -79,6 +92,9 @@ func TestRegisterChannel(t *testing.T) {
 		backend.RegisterChannel(&ch)
 		assert.True(t, backend.HasChannel(ch.Name))
 	}
+
+	channels := backend.GetChannels()
+	assert.Equal(t, len(channels), len(testsetup.Channels))
 }
 
 func TestChannelAlreadyExists(t *testing.T) {

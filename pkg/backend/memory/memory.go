@@ -176,7 +176,7 @@ func (m *MemoryBackend) GetChannels() []*types.Channel {
 	return channels
 }
 
-func (m *MemoryBackend) GetParticipantList() []*types.Participant {
+func (m *MemoryBackend) GetParticipants() []*types.Participant {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
