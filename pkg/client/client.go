@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/isnastish/chat/pkg/logger"
+	"github.com/isnastish/chat/pkg/types"
+	"github.com/isnastish/chat/pkg/utilities"
 )
 
 type MenuOptionType int8
@@ -46,17 +48,19 @@ var usernameValidationFailedMessageContents = []byte("username validation failed
 
 const retriesCount int32 = 5
 
-type Message struct {
-	data []byte
+type ClientConfig struct {
+	Network      string
+	Addr         string
+	Port         int
+	RetriesCount int
 }
 
 type client struct {
-	remoteConn  net.Conn
-	network     string
-	address     string
-	quitCh      chan struct{}
-	incommingCh chan Message
-	outgoingCh  chan Message
+	config          *ClientConfig
+	remoteConn      net.Conn
+	quitChan        chan struct{}
+	inMessagesChan  chan *types.ChatMessage
+	outMessagesChan chan *types.ChatMessage
 }
 
 func CreateClient(network, address string) (*client, error) {
@@ -99,34 +103,17 @@ func (c *client) Run() {
 Loop:
 	for {
 		select {
-		case msg := <-c.incommingCh:
-			msgStr := string(msg.data)
-			fmt.Printf("%s", msgStr)
+		case msg := <-c.inMessagesChan:
+			log.Logger.Info("Message received")
+			fmt.Printf("%s", msg.Contents.String())
 
-		case msg := <-c.outgoingCh:
-			messageSize := len(msg.data)
+		case msg := <-c.outMessagesChan:
+			utilities.WriteBytes(c.remoteConn, msg.Contents)
 
-			var bytesWritten int
-			for bytesWritten < messageSize {
-				n, err := c.remoteConn.Write(msg.data[bytesWritten:])
-				if err != nil {
-					log.Logger.Error("failed to write to a remote connection: %s", err.Error())
-					break
-				}
-				bytesWritten += n
-			}
-			// if bytesWritten == messageSize {
-			// 	c.stats.MessagesSent.Add(1)
-			// } else {
-			// 	c.stats.MessagesDropped.Add(1)
-			// }
-			// log.Info().Msgf("sent message: %s", string(msg.data))
-
-		case <-c.quitCh:
+		case <-c.quitChan:
 			break Loop
 		}
 	}
-
 	c.remoteConn.Close()
 }
 

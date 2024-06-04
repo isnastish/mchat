@@ -8,6 +8,7 @@ import (
 
 	"github.com/isnastish/chat/pkg/logger"
 	"github.com/isnastish/chat/pkg/types"
+	"github.com/isnastish/chat/pkg/utilities"
 )
 
 type connectionState int8
@@ -23,7 +24,7 @@ var connectionStateTable = []string{
 }
 
 type connection struct {
-	conn         net.Conn
+	netConn      net.Conn
 	ipAddr       string
 	state        connectionState
 	participant  *types.Participant
@@ -54,7 +55,7 @@ func (c *connection) disconnectIfIdle() {
 		select {
 		case <-c.connTimeout.C:
 			close(c.idleConnChan)
-			c.conn.Close()
+			c.netConn.Close()
 			return
 		case <-c.abortChan:
 			if !c.connTimeout.Stop() {
@@ -65,18 +66,6 @@ func (c *connection) disconnectIfIdle() {
 			return
 		}
 	}
-}
-
-func (c *connection) writeBytes(contents []byte, contentsSize int) (int, error) {
-	var bWritten int
-	for bWritten < contentsSize {
-		n, err := c.conn.Write(contents[bWritten:])
-		if err != nil {
-			return bWritten, err
-		}
-		bWritten += n
-	}
-	return bWritten, nil
 }
 
 func (cm *connectionMap) addConn(conn *connection) {
@@ -125,7 +114,7 @@ func (cm *connectionMap) broadcastMessage(message types.Message, kind types.Mess
 					continue
 				}
 
-				n, err := conn.writeBytes(msg.Contents.Bytes(), msg.Contents.Len())
+				n, err := utilities.WriteBytes(conn.netConn, msg.Contents)
 				if err != nil || (n != msg.Contents.Len()) {
 					log.Logger.Error("Failed to send a chat message to the participant: %s", conn.participant.Username)
 				} else {
@@ -139,7 +128,7 @@ func (cm *connectionMap) broadcastMessage(message types.Message, kind types.Mess
 			for _, receiver := range msg.ReceiveList {
 				conn, exists := cm.connections[receiver]
 				if exists {
-					n, err := conn.writeBytes(msg.Contents.Bytes(), msg.Contents.Len())
+					n, err := utilities.WriteBytes(conn.netConn, msg.Contents)
 					if err != nil || (n != msg.Contents.Len()) {
 						log.Logger.Error("Failed to send a system message to the connection ip: %s", conn.ipAddr)
 					} else {
@@ -151,7 +140,7 @@ func (cm *connectionMap) broadcastMessage(message types.Message, kind types.Mess
 			// A case where messages about participants leaving broadcasted to all the other connected participants
 			for _, conn := range cm.connections {
 				if conn.isState(Connected) {
-					n, err := conn.writeBytes(msg.Contents.Bytes(), msg.Contents.Len())
+					n, err := utilities.WriteBytes(conn.netConn, msg.Contents)
 					if err != nil || (n != msg.Contents.Len()) {
 						log.Logger.Error("Failed to send a system message to the participant: %s", conn.participant.Username)
 					} else {
