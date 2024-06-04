@@ -15,7 +15,7 @@ type MemoryBackend struct {
 	participants map[string]*types.Participant
 	chatHistory  []*types.ChatMessage
 	channels     map[string]*types.Channel
-	mu           sync.Mutex
+	mu           sync.RWMutex
 }
 
 func NewMemoryBackend() *MemoryBackend {
@@ -37,8 +37,8 @@ func (m *MemoryBackend) doesChannelExist(channelName string) bool {
 }
 
 func (b *MemoryBackend) HasParticipant(username string) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	return b.doesParticipantExist(username)
 }
 
@@ -66,8 +66,8 @@ func (m *MemoryBackend) RegisterParticipant(participant *types.Participant) {
 }
 
 func (m *MemoryBackend) AuthParticipant(participant *types.Participant) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	participant, exists := m.participants[participant.Username]
 	if exists {
@@ -86,7 +86,7 @@ func (m *MemoryBackend) StoreMessage(message *types.ChatMessage) {
 		Contents: bytes.NewBuffer(bytes.Clone(message.Contents.Bytes())),
 		Sender:   message.Sender,
 		Channel:  message.Channel,
-		Time:     message.Time,
+		SentTime: message.SentTime,
 	}
 
 	if message.Channel != "" {
@@ -104,8 +104,8 @@ func (m *MemoryBackend) StoreMessage(message *types.ChatMessage) {
 }
 
 func (m *MemoryBackend) HasChannel(channelname string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.doesChannelExist(channelname)
 }
 
@@ -143,14 +143,14 @@ func (m *MemoryBackend) DeleteChannel(channelname string) bool {
 }
 
 func (m *MemoryBackend) GetChatHistory() []*types.ChatMessage {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.chatHistory
 }
 
 func (m *MemoryBackend) GetChannelHistory(channelname string) []*types.ChatMessage {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	if !m.doesChannelExist(channelname) {
 		log.Logger.Panic("Failed to list chat history, channel %s doesn't exist", channelname)
@@ -161,8 +161,8 @@ func (m *MemoryBackend) GetChannelHistory(channelname string) []*types.ChatMessa
 }
 
 func (m *MemoryBackend) GetChannels() []*types.Channel {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	var channels []*types.Channel
 	var chanCount = len(m.channels)
@@ -177,8 +177,8 @@ func (m *MemoryBackend) GetChannels() []*types.Channel {
 }
 
 func (m *MemoryBackend) GetParticipants() []*types.Participant {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	var partList []*types.Participant
 	var partCount = len(m.participants)

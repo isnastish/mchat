@@ -2,31 +2,42 @@ package testsetup
 
 import (
 	"bytes"
+	"time"
 
 	"github.com/isnastish/chat/pkg/types"
 )
+
+// Helper function for convertions from the current time
+// to its string representation.
+func timeNowString() string {
+	return time.Now().Format(time.TimeOnly)
+}
 
 var Participants = []types.Participant{
 	{
 		Username: "IvanIvanov",
 		Password: "ThisIsI1sPassw0rd@",
 		Email:    "example@gmail.com",
+		JoinTime: timeNowString(),
 	},
 	{
 		Username: "MarkLutz",
 		Password: "Some_other_password@234",
 		Email:    "mark@mail.ru",
+		JoinTime: timeNowString(),
 	},
 
 	{
 		Username: "nasayer1234",
 		Password: "nasayerLive234@Outline",
 		Email:    "nasayer@gmail.com",
+		JoinTime: timeNowString(),
 	},
 	{
 		Username: "anonymus__",
 		Password: "SomeRandomPass8ordHere",
 		Email:    "anonymus@mail.ru",
+		JoinTime: timeNowString(),
 	},
 }
 
@@ -107,7 +118,7 @@ func ContainsMessage(src []types.ChatMessage, message *types.ChatMessage) bool {
 	for _, srcMsg := range src {
 		if srcMsg.Channel == message.Channel &&
 			srcMsg.Sender == message.Sender &&
-			srcMsg.Time == message.Time &&
+			srcMsg.SentTime == message.SentTime &&
 			bytes.Equal(srcMsg.Contents.Bytes(), message.Contents.Bytes()) {
 			return true
 		}
@@ -118,8 +129,8 @@ func ContainsMessage(src []types.ChatMessage, message *types.ChatMessage) bool {
 func ContainsParticipant(src []types.Participant, p *types.Participant) bool {
 	for _, srcP := range src {
 		if srcP.Username == p.Username &&
-			srcP.Email == p.Email &&
-			srcP.JoinTime == p.JoinTime { // Match the password as well?
+			srcP.JoinTime == p.JoinTime &&
+			srcP.Email == p.Email {
 			return true
 		}
 	}
@@ -133,8 +144,8 @@ func ContainsChannel(src []types.Channel, ch *types.Channel) bool {
 		// I would have to think about it more carefully
 		if srcCh.Name == ch.Name &&
 			srcCh.Desc == ch.Desc &&
-			srcCh.Creator == ch.Creator &&
-			srcCh.CreationDate == ch.CreationDate {
+			srcCh.CreationDate == ch.CreationDate &&
+			srcCh.Creator == ch.Creator {
 			return true
 		}
 	}

@@ -2,13 +2,13 @@
 // Maybe the data should be replicated on disk after each operation: RegisterParticipant/Channel etc.
 // TODO: Implement metrics using prometheus or grafana.
 // TODO: Explore Redis' transactions, maybe we wouldn't have to maintain a mutex.
-
+// TODO: GetChatHistory and GetChannelHistory have some duplications, they have to be combined into a single function.
 package redis
 
 import (
+	"bytes"
 	"context"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,7 +24,7 @@ import (
 type RedisBackend struct {
 	client *redis.Client
 	ctx    context.Context
-	mu     sync.Mutex
+	mu     sync.RWMutex
 }
 
 func NewRedisBackend(addr string) (*RedisBackend, error) {
@@ -55,8 +55,11 @@ func (r *RedisBackend) doesChannelExist(channelname string) bool {
 }
 
 func (r *RedisBackend) HasParticipant(username string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	// NOTE: Read lock will block until any open write lock is released.
+	// The Lock() method of the write lock will block if another process has either read or write lock
+	// until that lock is released.
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.doesParticipantExist(username)
 }
 
@@ -68,6 +71,8 @@ func (r *RedisBackend) RegisterParticipant(participant *types.Participant) {
 	if !validation.ValidatePasswordSha256(passwordHash) {
 		log.Logger.Panic("Failed to register participant %s. Password validation failed", participant.Username)
 	}
+
+	// r.client.Del(r.ctx, "participants:")
 
 	if r.doesParticipantExist(participant.Username) {
 		log.Logger.Panic("Participant %s already exists", participant.Username)
@@ -101,26 +106,26 @@ func (r *RedisBackend) RegisterParticipant(participant *types.Participant) {
 }
 
 // NOTE: Not a part of a public API yet.
-func (r *RedisBackend) deleteParticipant(participant *types.Participant) {
+func (r *RedisBackend) deleteParticipant(username string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.doesParticipantExist(participant.Username) {
-		r.client.SRem(r.ctx, "participants:", participant.Username)
-		participantHash := utilities.Sha256Checksum([]byte(participant.Username))
+	if r.doesParticipantExist(username) {
+		r.client.SRem(r.ctx, "participants:", username)
+		participantHash := utilities.Sha256Checksum([]byte(username))
 		r.client.Del(r.ctx, participantHash)
 
-		log.Logger.Info("Participant %s was deleted", participant.Username)
+		log.Logger.Info("Participant %s was deleted", username)
 	}
 }
 
 func (r *RedisBackend) AuthParticipant(participant *types.Participant) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	participantHash := utilities.Sha256Checksum([]byte(participant.Username))
+	if r.doesParticipantExist(participant.Username) {
+		participantHash := utilities.Sha256Checksum([]byte(participant.Username))
 
-	if r.doesParticipantExist(participantHash) {
 		// NOTE: This has to be in sync with types.Participant struct because it relies on the order of fields.
 		// Field(1) is expected to correspond to the Password field inside that struct.
 		passwordFiledName := reflect.TypeOf(participant).Elem().Field(1).Name
@@ -137,27 +142,29 @@ func (r *RedisBackend) StoreMessage(message *types.ChatMessage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	var messageKey string
+	var messagesKey string
 	var messageId string
 
 	if message.Channel != "" {
 		if !r.doesChannelExist(message.Channel) {
 			log.Logger.Panic("Failed to store a message, channel %s doesn't exist", message.Channel)
 		}
-		messageKey = "messages/" + message.Channel + ":"
-		messageId = messageKey + strconv.FormatInt(r.client.Incr(r.ctx, messageKey).Val(), 10)
-		r.client.SAdd(r.ctx, messageKey, messageId)
+		messagesKey = "messages/" + message.Channel + ":"
+		messageId = message.Sender + ":" + time.Now().Format(time.DateTime)
+		r.client.SAdd(r.ctx, messagesKey, messageId)
 	} else {
-		messageKey = "messages/general:"
-		messageId = messageKey + strconv.FormatInt(r.client.Incr(r.ctx, messageKey).Val(), 10)
-		r.client.SAdd(r.ctx, messageKey, messageId)
+		messagesKey = "messages/general:"
+		messageId = message.Sender + ":" + time.Now().Format(time.DateTime)
+		r.client.SAdd(r.ctx, messagesKey, messageId)
 	}
 
 	value := reflect.ValueOf(message).Elem()
 	for i := 0; i < value.NumField(); i++ {
 		fieldname := value.Type().Field(i).Name
 		fieldvalue := value.Field(i).Interface()
-
+		if value.Field(i).Type() == reflect.TypeOf(message.Contents) {
+			fieldvalue = message.Contents.String()
+		}
 		r.client.HSet(r.ctx, messageId, fieldname, fieldvalue)
 	}
 
@@ -169,17 +176,16 @@ func (r *RedisBackend) StoreMessage(message *types.ChatMessage) {
 }
 
 func (r *RedisBackend) GetChatHistory() []*types.ChatMessage {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	messageKey := "messages/general:"
 
 	if members := r.client.SMembers(r.ctx, messageKey).Val(); len(members) != 0 {
 		messages := make([]*types.ChatMessage, 0, len(members))
-		// O(n^2)
-		for _, messageid := range members {
-			data := r.client.HGetAll(r.ctx, messageid)
-			if len(data.Val()) == 0 {
+		for _, messageid := range members { // O(n^2)
+			data := r.client.HGetAll(r.ctx, messageid).Val()
+			if len(data) == 0 {
 				log.Logger.Panic("Message %s not found", messageid)
 			}
 
@@ -188,26 +194,61 @@ func (r *RedisBackend) GetChatHistory() []*types.ChatMessage {
 			value := reflect.ValueOf(message).Elem()
 			for i := 0; i < value.NumField(); i++ {
 				fieldname := value.Type().Field(i).Name
-				value.Field(i).Set(reflect.ValueOf(data.Val()[fieldname]))
+				if fieldname == value.Type().Field(0).Name {
+					contents := data[fieldname]
+					buf := bytes.NewBuffer(make([]byte, 0, len(contents)))
+					buf.WriteString(contents)
+					value.Field(i).Set(reflect.ValueOf(buf))
+					continue
+				}
+				value.Field(i).Set(reflect.ValueOf(data[fieldname]))
 			}
 			message = (*types.ChatMessage)(value.Addr().UnsafePointer())
 			messages = append(messages, message)
 		}
-
 		return messages
 	}
-
 	return nil
 }
 
-// Delete all messages in each channel
-func (r *RedisBackend) deleteMessages(channelnames []string) {
+// NOTE: Not a part of a public API yet.
+func (r *RedisBackend) deleteMessages(channels ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
+	if len(channels) != 0 {
+		for _, chName := range channels {
+			if !r.doesChannelExist(chName) {
+				log.Logger.Panic("Cannot delete messages, channel %s doesn't exist", chName)
+			}
+
+			channelMessagesKey := "messages/" + chName + ":"
+			messages := r.client.SMembers(r.ctx, channelMessagesKey).Val()
+
+			for _, messageId := range messages {
+				if len(r.client.HGetAll(r.ctx, messageId).Val()) == 0 {
+					log.Logger.Panic("Message id:%s doesn't exist", messageId)
+				}
+				r.client.Del(r.ctx, messageId)
+			}
+			r.client.SPopN(r.ctx, channelMessagesKey, int64(len(messages)))
+		}
+	} else {
+		generalMessagesKey := "messages/general:"
+		members := r.client.SMembers(r.ctx, generalMessagesKey).Val()
+		for _, messageId := range members {
+			r.client.SRem(r.ctx, generalMessagesKey, messageId)
+			r.client.Del(r.ctx, messageId)
+		}
+		r.client.SPopN(r.ctx, generalMessagesKey, int64(len(members)))
+
+		log.Logger.Info("All messages were deleted in a general chat")
+	}
 }
 
 func (r *RedisBackend) HasChannel(channelname string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.doesChannelExist(channelname)
 }
 
@@ -229,10 +270,7 @@ func (r *RedisBackend) RegisterChannel(channel *types.Channel) {
 			continue
 		}
 
-		fieldname := value.Type().Field(i).Name
-		fieldvalue := value.Field(i).Interface()
-
-		r.client.HSet(r.ctx, channelHash, fieldname, fieldvalue)
+		r.client.HSet(r.ctx, channelHash, value.Type().Field(i).Name, value.Field(i).Interface())
 	}
 
 	if len(r.client.HGetAll(r.ctx, channelHash).Val()) != 0 {
@@ -260,12 +298,49 @@ func (r *RedisBackend) DeleteChannel(channelname string) bool {
 }
 
 func (r *RedisBackend) GetChannelHistory(channelname string) []*types.ChatMessage {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if !r.doesChannelExist(channelname) {
+		log.Logger.Panic("Failed to retrieve chat history, channel %s doesn't exist", channelname)
+	}
+
+	messagesKey := "messages/" + channelname + ":"
+
+	if ids := r.client.SMembers(r.ctx, messagesKey).Val(); len(ids) != 0 {
+		messages := make([]*types.ChatMessage, 0, len(ids))
+		for _, messageId := range ids {
+			messageData := r.client.HGetAll(r.ctx, messageId).Val()
+
+			if len(messageData) == 0 {
+				log.Logger.Panic("Message id:%s not found", messageId)
+			}
+
+			message := &types.ChatMessage{}
+
+			value := reflect.ValueOf(message).Elem()
+			for i := 0; i < value.NumField(); i++ {
+				fieldname := value.Type().Field(i).Name
+				if fieldname == value.Type().Field(0).Name {
+					contents := messageData[fieldname]
+					buf := bytes.NewBuffer(make([]byte, 0, len(contents)))
+					buf.WriteString(contents)
+					value.Field(i).Set(reflect.ValueOf(buf))
+					continue
+				}
+				value.Field(i).Set(reflect.ValueOf(messageData[fieldname]))
+			}
+			message = (*types.ChatMessage)(value.Addr().UnsafePointer())
+			messages = append(messages, message)
+		}
+		return messages
+	}
 	return nil
 }
 
 func (r *RedisBackend) GetChannels() []*types.Channel {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	members := r.client.SMembers(r.ctx, "channels:")
 	if len(members.Val()) == 0 {
@@ -287,11 +362,9 @@ func (r *RedisBackend) GetChannels() []*types.Channel {
 		value := reflect.ValueOf(channel).Elem()
 		for i := 0; i < value.NumField(); i++ {
 			fieldname := value.Type().Field(i).Name
-
 			switch value.Field(i).Type() {
 			case reflect.TypeOf(channel.Members):
-			case reflect.TypeOf(channel.Members):
-			case reflect.TypeOf(channel.CreationDate):
+			case reflect.TypeOf(channel.ChatHistory):
 			default:
 				value.Field(i).Set(reflect.ValueOf(data.Val()[fieldname]))
 			}
@@ -303,8 +376,8 @@ func (r *RedisBackend) GetChannels() []*types.Channel {
 }
 
 func (r *RedisBackend) GetParticipants() []*types.Participant {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	// TODO: Figure out how to use redis transactions in order to speed up the performance
 	// (reduce the amount of calls to the redis server)
@@ -328,13 +401,7 @@ func (r *RedisBackend) GetParticipants() []*types.Participant {
 		value := reflect.ValueOf(participant).Elem()
 		for i := 0; i < value.NumField(); i++ {
 			fieldname := value.Type().Field(i).Name
-			if value.Field(i).CanSet() {
-				if value.Field(i).Type() == reflect.TypeOf(participant.JoinTime) {
-					value.Field(i).Set(reflect.ValueOf(time.Now()))
-					continue
-				}
-				value.Field(i).Set(reflect.ValueOf(data.Val()[fieldname]))
-			}
+			value.Field(i).Set(reflect.ValueOf(data.Val()[fieldname]))
 		}
 		participant = (*types.Participant)(value.Addr().UnsafePointer())
 		participants = append(participants, participant)

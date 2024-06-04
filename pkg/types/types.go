@@ -2,7 +2,6 @@ package types
 
 import (
 	"bytes"
-	"time"
 )
 
 // NOTE: The sent time should be computed on the client itself rather than on the server when it sends a message,
@@ -20,7 +19,7 @@ type Participant struct {
 	Username string
 	Password string
 	Email    string
-	JoinTime time.Time
+	JoinTime string
 }
 
 type Message interface{}
@@ -29,20 +28,20 @@ type ChatMessage struct {
 	Contents *bytes.Buffer
 	Sender   string
 	Channel  string
-	Time     time.Time
+	SentTime string
 }
 
 type SysMessage struct {
 	Contents    *bytes.Buffer
 	ReceiveList []string
-	Time        time.Time
+	SentTime    string
 }
 
 type Channel struct {
 	Name         string
 	Desc         string
 	Creator      string
-	CreationDate time.Time
+	CreationDate string
 	ChatHistory  []*ChatMessage
 	Members      []string
 }
