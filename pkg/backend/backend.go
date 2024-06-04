@@ -30,4 +30,6 @@ type Backend interface {
 	GetChannels() []*types.Channel
 	GetParticipants() []*types.Participant
 	// ChanelAddMember(channelname string, member string)
+	// TODO: Add a capability for deleting single messages
+	// and deleting all the messages in a channel and in a general chat.
 }

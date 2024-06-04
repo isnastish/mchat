@@ -6,15 +6,6 @@ import (
 	"github.com/isnastish/chat/pkg/types"
 )
 
-// Helper function for creating message contents.
-// The size of the buffer should be increased to allow testing of enormously large messages.
-func message(msg string) *bytes.Buffer {
-	nBytes := len(msg)
-	buf := bytes.NewBuffer(make([]byte, 0, nBytes))
-	buf.WriteString(msg)
-	return buf
-}
-
 var Participants = []types.Participant{
 	{
 		Username: "IvanIvanov",
@@ -101,4 +92,74 @@ var GeneralMessages = []types.ChatMessage{
 			"I was missing you a lot and cannot wait to spend some time together."),
 		Sender: "Elizabeth Swann",
 	},
+}
+
+// Helper function for creating message contents.
+// The size of the buffer should be increased to allow testing of enormously large messages.
+func message(msg string) *bytes.Buffer {
+	nBytes := len(msg)
+	buf := bytes.NewBuffer(make([]byte, 0, nBytes))
+	buf.WriteString(msg)
+	return buf
+}
+
+func ContainsMessage(src []types.ChatMessage, message *types.ChatMessage) bool {
+	for _, srcMsg := range src {
+		if srcMsg.Channel == message.Channel &&
+			srcMsg.Sender == message.Sender &&
+			srcMsg.Time == message.Time &&
+			bytes.Equal(srcMsg.Contents.Bytes(), message.Contents.Bytes()) {
+			return true
+		}
+	}
+	return false
+}
+
+func ContainsParticipant(src []types.Participant, p *types.Participant) bool {
+	for _, srcP := range src {
+		if srcP.Username == p.Username &&
+			srcP.Email == p.Email &&
+			srcP.JoinTime == p.JoinTime { // Match the password as well?
+			return true
+		}
+	}
+	return false
+}
+
+func ContainsChannel(src []types.Channel, ch *types.Channel) bool {
+	for _, srcCh := range src {
+		// TODO: Match chat messages and members as well.
+		// Maybe a channel should hold chat messages.
+		// I would have to think about it more carefully
+		if srcCh.Name == ch.Name &&
+			srcCh.Desc == ch.Desc &&
+			srcCh.Creator == ch.Creator &&
+			srcCh.CreationDate == ch.CreationDate {
+			return true
+		}
+	}
+	return false
+}
+
+type dataType interface {
+	types.ChatMessage | types.Participant | types.Channel
+}
+
+// TODO: Test modifying []*types.ChatMessage vs []types.ChatMessage,
+// if any modications caused to []types.ChatMessage modify the origin slice,
+// we shouldn't pass pointer everywhere.
+// Unify Match function to match Participants, Channels and Messages.
+// And move contanins function outside.
+func Match[T dataType](a []*T, b []T, callback func([]T, *T) bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for _, item := range a {
+		if !callback(b, item) {
+			return false
+		}
+	}
+
+	return true
 }

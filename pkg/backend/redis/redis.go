@@ -8,6 +8,7 @@ package redis
 import (
 	"context"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -133,6 +134,74 @@ func (r *RedisBackend) AuthParticipant(participant *types.Participant) bool {
 }
 
 func (r *RedisBackend) StoreMessage(message *types.ChatMessage) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var messageKey string
+	var messageId string
+
+	if message.Channel != "" {
+		if !r.doesChannelExist(message.Channel) {
+			log.Logger.Panic("Failed to store a message, channel %s doesn't exist", message.Channel)
+		}
+		messageKey = "messages/" + message.Channel + ":"
+		messageId = messageKey + strconv.FormatInt(r.client.Incr(r.ctx, messageKey).Val(), 10)
+		r.client.SAdd(r.ctx, messageKey, messageId)
+	} else {
+		messageKey = "messages/general:"
+		messageId = messageKey + strconv.FormatInt(r.client.Incr(r.ctx, messageKey).Val(), 10)
+		r.client.SAdd(r.ctx, messageKey, messageId)
+	}
+
+	value := reflect.ValueOf(message).Elem()
+	for i := 0; i < value.NumField(); i++ {
+		fieldname := value.Type().Field(i).Name
+		fieldvalue := value.Field(i).Interface()
+
+		r.client.HSet(r.ctx, messageId, fieldname, fieldvalue)
+	}
+
+	if len(r.client.HGetAll(r.ctx, messageId).Val()) != 0 {
+		log.Logger.Info("Message was stored")
+	} else {
+		log.Logger.Info("Failed to store the message")
+	}
+}
+
+func (r *RedisBackend) GetChatHistory() []*types.ChatMessage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	messageKey := "messages/general:"
+
+	if members := r.client.SMembers(r.ctx, messageKey).Val(); len(members) != 0 {
+		messages := make([]*types.ChatMessage, 0, len(members))
+		// O(n^2)
+		for _, messageid := range members {
+			data := r.client.HGetAll(r.ctx, messageid)
+			if len(data.Val()) == 0 {
+				log.Logger.Panic("Message %s not found", messageid)
+			}
+
+			message := &types.ChatMessage{}
+
+			value := reflect.ValueOf(message).Elem()
+			for i := 0; i < value.NumField(); i++ {
+				fieldname := value.Type().Field(i).Name
+				value.Field(i).Set(reflect.ValueOf(data.Val()[fieldname]))
+			}
+			message = (*types.ChatMessage)(value.Addr().UnsafePointer())
+			messages = append(messages, message)
+		}
+
+		return messages
+	}
+
+	return nil
+}
+
+// Delete all messages in each channel
+func (r *RedisBackend) deleteMessages(channelnames []string) {
 
 }
 
@@ -190,11 +259,6 @@ func (r *RedisBackend) DeleteChannel(channelname string) bool {
 	return false
 }
 
-func (r *RedisBackend) GetChatHistory() []*types.ChatMessage {
-
-	return nil
-}
-
 func (r *RedisBackend) GetChannelHistory(channelname string) []*types.ChatMessage {
 	return nil
 }
@@ -223,13 +287,12 @@ func (r *RedisBackend) GetChannels() []*types.Channel {
 		value := reflect.ValueOf(channel).Elem()
 		for i := 0; i < value.NumField(); i++ {
 			fieldname := value.Type().Field(i).Name
-			if value.Field(i).CanSet() {
-				fieldtype := value.Field(i).Type()
-				if fieldtype == reflect.TypeOf(channel.Members) ||
-					fieldtype == reflect.TypeOf(channel.ChatHistory) ||
-					fieldtype == reflect.TypeOf(channel.CreationDate) {
-					continue
-				}
+
+			switch value.Field(i).Type() {
+			case reflect.TypeOf(channel.Members):
+			case reflect.TypeOf(channel.Members):
+			case reflect.TypeOf(channel.CreationDate):
+			default:
 				value.Field(i).Set(reflect.ValueOf(data.Val()[fieldname]))
 			}
 		}
