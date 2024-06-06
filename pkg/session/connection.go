@@ -14,107 +14,155 @@ import (
 type connectionState int8
 
 const (
-	Pending   connectionState = 0x1
-	Connected connectionState = 0x2
+	pendingState   connectionState = 0
+	connectedState connectionState = 0x1
 )
 
-var connectionStateTable = []string{
-	"offline",
-	"online",
-}
+var connStateTable []string
 
 type connection struct {
-	netConn      net.Conn
-	ipAddr       string
-	state        connectionState
-	participant  *types.Participant
-	connTimeout  *time.Timer
-	duration     time.Duration
+	netConn     net.Conn
+	ipAddr      string
+	participant *types.Participant
+	channel     *types.Channel
+	timeout     time.Duration
+
+	// TODO: Better names.
 	idleConnChan chan struct{}
 	abortChan    chan struct{}
 	quitChan     chan struct{}
+
+	state connectionState
 }
 
 type connectionMap struct {
 	connections map[string]*connection
-	mu          sync.Mutex
+	mu          sync.RWMutex
+}
+
+func initConnStateTable() {
+	connStateTable[pendingState] = "offline"
+	connStateTable[connectedState] = "online"
+}
+
+func newConn(conn net.Conn, timeout time.Duration) *connection {
+	return &connection{
+		netConn:      conn,
+		ipAddr:       conn.RemoteAddr().String(),
+		participant:  &types.Participant{},
+		channel:      &types.Channel{},
+		timeout:      timeout,
+		idleConnChan: make(chan struct{}),
+		abortChan:    make(chan struct{}),
+		quitChan:     make(chan struct{}),
+
+		state: pendingState,
+	}
 }
 
 func newConnectionMap() *connectionMap {
+	initConnStateTable()
 	return &connectionMap{
 		connections: make(map[string]*connection),
 	}
 }
 
-func (c connection) isState(state connectionState) bool {
+func (c *connection) matchState(state connectionState) bool {
 	return c.state == state
 }
 
+// This function should be triggered only when the client was able to register or authenticate.
+// The time when a participant tries to submit all the data is not taken into account.
 func (c *connection) disconnectIfIdle() {
+	timer := time.NewTimer(c.timeout)
 	for {
 		select {
-		case <-c.connTimeout.C:
+		case <-timer.C:
 			close(c.idleConnChan)
 			c.netConn.Close()
 			return
 		case <-c.abortChan:
-			if !c.connTimeout.Stop() {
-				<-c.connTimeout.C
+			if !timer.Stop() {
+				<-timer.C
 			}
-			c.connTimeout.Reset(c.duration)
+			timer.Reset(c.timeout)
 		case <-c.quitChan:
 			return
 		}
 	}
 }
 
+func (cm *connectionMap) _doesConnExist(connIpAddr string) bool {
+	_, exists := cm.connections[connIpAddr]
+	return exists
+}
+
 func (cm *connectionMap) addConn(conn *connection) {
 	cm.mu.Lock()
+	defer cm.mu.Unlock()
 	cm.connections[conn.ipAddr] = conn
-	cm.mu.Unlock()
 }
 
 func (cm *connectionMap) removeConn(connIpAddr string) {
 	cm.mu.Lock()
-	delete(cm.connections, connIpAddr)
-	cm.mu.Unlock()
-}
-
-func (cm *connectionMap) totalCount() int {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-	return len(cm.connections)
-}
-
-func (cm *connectionMap) assignParticipant(connIpAddr string, participant *types.Participant) {
-	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	conn, exists := cm.connections[connIpAddr]
-	if !exists {
-		log.Logger.Info("Connection ip: %s doesn't exist", connIpAddr)
+	if !cm._doesConnExist(connIpAddr) {
+		log.Logger.Panic("Connection {%s} doesn't exist", connIpAddr)
 	}
 
-	conn.participant = participant
-	conn.state = Connected
+	delete(cm.connections, connIpAddr)
+}
+
+func (cm *connectionMap) hasConnectedParticipant(username string) bool {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	for _, conn := range cm.connections {
+		if conn.matchState(connectedState) {
+			if conn.participant.Username == username {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (cm *connectionMap) empty() bool {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	return len(cm.connections) == 0
+}
+
+func (cm *connectionMap) markAsConnected(connIpAddr string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	if !cm._doesConnExist(connIpAddr) {
+		log.Logger.Panic("Connection {%s} doesn't exist", connIpAddr)
+	}
+
+	cm.connections[connIpAddr].state = connectedState
 }
 
 // Pointers to interfaces: https://stackoverflow.com/questions/44370277/type-is-pointer-to-interface-not-interface-confusion
-func (cm *connectionMap) broadcastMessage(message types.Message, kind types.MessageKind) int {
+func (cm *connectionMap) broadcastMessage(message interface{}) int {
 	var sentCount int
 
-	cm.mu.Lock()
-	if kind == types.ChatMessageType {
+	cm.mu.RLock()
+	defer cm.mu.Unlock()
+
+	switch msg := message.(type) {
+	case *types.ChatMessage:
 		senderWasSkipped := false
-		msg := message.(types.ChatMessage)
 		for _, conn := range cm.connections {
-			if conn.isState(Connected) {
+			if conn.matchState(connectedState) {
 				if !senderWasSkipped && strings.EqualFold(conn.participant.Username, msg.Sender) {
 					senderWasSkipped = true
 					continue
 				}
 
-				n, err := utilities.WriteBytes(conn.netConn, msg.Contents)
+				n, err := util.WriteBytes(conn.netConn, msg.Contents)
 				if err != nil || (n != msg.Contents.Len()) {
 					log.Logger.Error("Failed to send a chat message to the participant: %s", conn.participant.Username)
 				} else {
@@ -122,25 +170,23 @@ func (cm *connectionMap) broadcastMessage(message types.Message, kind types.Mess
 				}
 			}
 		}
-	} else {
-		msg := message.(types.SysMessage)
-		if len(msg.ReceiveList) != 0 {
-			for _, receiver := range msg.ReceiveList {
-				conn, exists := cm.connections[receiver]
-				if exists {
-					n, err := utilities.WriteBytes(conn.netConn, msg.Contents)
-					if err != nil || (n != msg.Contents.Len()) {
-						log.Logger.Error("Failed to send a system message to the connection ip: %s", conn.ipAddr)
-					} else {
-						sentCount++
-					}
+
+	case *types.SysMessage:
+		if msg.Recipient != "" {
+			conn, exists := cm.connections[msg.Recipient]
+			if exists {
+				n, err := util.WriteBytes(conn.netConn, msg.Contents)
+				if err != nil || (n != msg.Contents.Len()) {
+					log.Logger.Error("Failed to send a system message to the connection ip: %s", conn.ipAddr)
+				} else {
+					sentCount++
 				}
 			}
 		} else {
 			// A case where messages about participants leaving broadcasted to all the other connected participants
 			for _, conn := range cm.connections {
-				if conn.isState(Connected) {
-					n, err := utilities.WriteBytes(conn.netConn, msg.Contents)
+				if conn.matchState(connectedState) {
+					n, err := util.WriteBytes(conn.netConn, msg.Contents)
 					if err != nil || (n != msg.Contents.Len()) {
 						log.Logger.Error("Failed to send a system message to the participant: %s", conn.participant.Username)
 					} else {
@@ -149,8 +195,10 @@ func (cm *connectionMap) broadcastMessage(message types.Message, kind types.Mess
 				}
 			}
 		}
+
+	default:
+		log.Logger.Panic("Invalid message type")
 	}
-	cm.mu.Unlock()
 
 	return sentCount
 }

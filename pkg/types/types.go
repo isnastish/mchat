@@ -1,19 +1,15 @@
+// TODO: Try replacing msg param to BuildSysMsg with strings.Builder.
 package types
 
 import (
 	"bytes"
+
+	"github.com/isnastish/chat/pkg/utilities"
 )
 
 // NOTE: The sent time should be computed on the client itself rather than on the server when it sends a message,
 // and the receive time should be computed when a client receives the message.
 // Maybe we could compute the time on a session to simplify things.
-
-type MessageKind int8
-
-const (
-	ChatMessageType MessageKind = 0x01
-	SysMessageType  MessageKind = 0x02
-)
 
 type Participant struct {
 	Username string
@@ -21,8 +17,6 @@ type Participant struct {
 	Email    string
 	JoinTime string
 }
-
-type Message interface{}
 
 type ChatMessage struct {
 	Contents *bytes.Buffer
@@ -32,9 +26,9 @@ type ChatMessage struct {
 }
 
 type SysMessage struct {
-	Contents    *bytes.Buffer
-	ReceiveList []string
-	SentTime    string
+	Contents  *bytes.Buffer
+	Recipient string
+	SentTime  string
 }
 
 type Channel struct {
@@ -46,8 +40,31 @@ type Channel struct {
 	Members      []string
 }
 
-type RedisConfig struct {
+// Helper function for building system messages.
+func BuildSysMsg(msg string, recipients ...string) *SysMessage {
+	var recipient string
+	if len(recipients) > 0 {
+		recipient = recipients[0]
+	}
+
+	return &SysMessage{
+		Contents:  bytes.NewBuffer([]byte(util.EndOfLine(msg))),
+		Recipient: recipient,
+		SentTime:  util.TimeNowStr(),
+	}
 }
 
-type DynamodbConfig struct {
+// Helper function for building chat messages.
+func BuildChatMsg(msg []byte, sender string, channels ...string) *ChatMessage {
+	var channel string
+	if len(channel) > 0 {
+		channel = channels[0]
+	}
+
+	return &ChatMessage{
+		Contents: bytes.NewBuffer(bytes.Clone(msg)),
+		Sender:   sender,
+		Channel:  channel,
+		SentTime: util.TimeNowStr(),
+	}
 }

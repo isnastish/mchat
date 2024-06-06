@@ -1,11 +1,11 @@
-package utilities
+package util
 
 import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"net"
-	"strings"
+	"time"
 )
 
 func Sha256Checksum(bytes []byte) string {
@@ -13,8 +13,8 @@ func Sha256Checksum(bytes []byte) string {
 	return fmt.Sprintf("%X", sum)
 }
 
-func Cr(builder *strings.Builder) {
-	builder.WriteString("\r\n")
+func EndOfLine(src string) string {
+	return src + "\r\n"
 }
 
 func WriteBytes(conn net.Conn, buffer *bytes.Buffer) (int, error) {
@@ -29,9 +29,10 @@ func WriteBytes(conn net.Conn, buffer *bytes.Buffer) (int, error) {
 	return bWritten, nil
 }
 
-// func Message(msgstr string) *bytes.Buffer {
-// 	msgsize := len(msgstr)
-// 	buf := bytes.NewBuffer(make([]byte, msgsize+2)) // for \r\n
-// 	buf.WriteString(msgstr)
-// 	return buf
-// }
+func TimeNowStr() string {
+	return time.Now().Format(time.DateTime)
+}
+
+func Fmt(format string, args ...any) string {
+	return fmt.Sprintf(format, args...)
+}

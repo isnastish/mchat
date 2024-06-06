@@ -43,7 +43,7 @@ func (d *DynamodbBackend) RegisterParticipant(participant *types.Participant) {
 
 	// TODO: Check whether a participant already exists first
 
-	passwordHash := utilities.Sha256Checksum([]byte(participant.Password))
+	passwordHash := util.Sha256Checksum([]byte(participant.Password))
 	if validation.ValidatePasswordSha256(passwordHash) {
 		log.Logger.Panic("Failed to register participant %s. Password validation failed", participant.Username)
 	}

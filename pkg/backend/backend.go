@@ -17,6 +17,7 @@ const (
 	BackendTypeMemory   BackendType = 0x03
 )
 
+// TODO: Return raw slices []type.ChatMessage rather than slice of pointers.
 type Backend interface {
 	HasParticipant(username string) bool
 	RegisterParticipant(participant *types.Participant)

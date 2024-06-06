@@ -1,0 +1,472 @@
+// TODO: Add an ability to remove participants from the chat.
+package session
+
+import (
+	"bytes"
+	"io"
+	"strconv"
+	"strings"
+
+	"github.com/isnastish/chat/pkg/logger"
+	"github.com/isnastish/chat/pkg/types"
+	"github.com/isnastish/chat/pkg/utilities"
+	"github.com/isnastish/chat/pkg/validation"
+)
+
+type readerState int8
+type readerSubstate int8
+
+const (
+	registerParticipant = 0
+	authParticipant     = 0x1
+	createChannel       = 0x2
+	selectChannel       = 0x3
+	listMembers         = 0x4
+	exit                = 0x5
+)
+
+var optionTable []string
+
+const (
+	nullState readerState = 0
+
+	joiningState             readerState = 0x1
+	registerParticipantState readerState = 0x2
+	authParticipantState     readerState = 0x3
+	acceptMessagesState      readerState = 0x4
+	createChannelState       readerState = 0x5
+	selectChannelState       readerState = 0x6
+	disconnectState          readerState = 0x7
+	processMenuState         readerState = 0x8
+	validateState            readerState = 0x9
+)
+
+const (
+	null readerSubstate = 0
+
+	readName      readerSubstate = 0x1
+	readPassword  readerSubstate = 0x2
+	readEmail     readerSubstate = 0x3
+	readDesc      readerSubstate = 0x4
+	readChanIndex readerSubstate = 0x5
+)
+
+type readerFSM struct {
+	conn *connection
+
+	prevState readerState
+	state     readerState
+	substate  readerSubstate
+
+	buffer *bytes.Buffer
+}
+
+func initOptionTable() {
+	optionTable[registerParticipant] = "register"
+	optionTable[authParticipant] = "log in"
+	optionTable[createChannel] = "create channel"
+	optionTable[selectChannel] = "select channels"
+	optionTable[listMembers] = "list members"
+	optionTable[exit] = "exit"
+}
+
+var optionsStr = util.Fmt(
+	"options:\n"+
+		"\t{%d}: %s\n"+
+		"\t{%d}: %s\n"+
+		"\t{%d}: %s\n"+
+		"\t{%d}: %s\n"+
+		"\t{%d}: %s\n"+
+		"\t{%d}: %s\n",
+	registerParticipant, optionTable[registerParticipant],
+	authParticipant, optionTable[authParticipant],
+	createChannel, optionTable[createChannel],
+	selectChannel, optionTable[selectChannel],
+	listMembers, optionTable[listMembers],
+	exit, optionTable[exit],
+)
+
+// TODO: Make it generic an accept io.Reader interface!?
+func newReader(conn *connection) *readerFSM {
+	initOptionTable()
+	return &readerFSM{
+		conn: conn,
+	}
+}
+
+func matchState(stateA, stateB readerState) bool {
+	return stateA == stateB
+}
+
+func matchSubstate(substateA, substateB readerSubstate) bool {
+	return substateA == substateB
+}
+
+func (r *readerFSM) read(chatSession *session) {
+	buffer := make([]byte, 1024)
+	bytesRead, err := r.conn.netConn.Read(buffer)
+	trimmedBuffer := []byte(strings.Trim(string(buffer[:bytesRead]), " \r\n\v\t\f"))
+	r.buffer = bytes.NewBuffer(trimmedBuffer)
+
+	if err != nil && err != io.EOF {
+		select {
+		case <-r.conn.idleConnChan:
+			chatSession.sendMessage(types.BuildSysMsg("Disconnecting due to being idle", r.conn.ipAddr))
+
+		default:
+			close(r.conn.quitChan)
+		}
+
+		r.state = disconnectState
+		return
+	}
+
+	if r.buffer.Len() == 0 {
+		close(r.conn.quitChan)
+		r.state = disconnectState
+	}
+}
+
+func (r *readerFSM) onJoiningState(chatSession *session) {
+	if !matchState(r.state, joiningState) && !matchState(r.state, processMenuState) {
+		log.Logger.Panic("Invalid state")
+	}
+
+	option, err := strconv.Atoi(r.buffer.String())
+	if err != nil {
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmt("Option %s not supported", r.buffer.String()), r.conn.ipAddr))
+	}
+
+	switch option {
+	case registerParticipant:
+		if matchState(r.state, joiningState) {
+			chatSession.sendMessage(types.BuildSysMsg("Username: ", r.conn.ipAddr))
+			r.prevState = joiningState
+			r.substate = readName
+			r.state = registerParticipantState
+			return
+		}
+		chatSession.sendMessage(types.BuildSysMsg("Already registered", r.conn.ipAddr))
+
+	case authParticipant:
+		if matchState(r.state, joiningState) {
+			chatSession.sendMessage(types.BuildSysMsg("Username: ", r.conn.ipAddr))
+			r.prevState = joiningState
+			r.substate = readName
+			r.state = authParticipantState
+			return
+		}
+		chatSession.sendMessage(types.BuildSysMsg("Already authenticated", r.conn.ipAddr))
+
+	case createChannel:
+		if !matchState(r.state, joiningState) {
+			chatSession.sendMessage(types.BuildSysMsg("Channel name: ", r.conn.ipAddr))
+			r.prevState = joiningState
+			r.substate = readName
+			r.state = createChannelState
+			return
+		}
+		chatSession.sendMessage(types.BuildSysMsg("Authentication required", r.conn.ipAddr))
+
+	case selectChannel:
+		if !matchState(r.state, joiningState) {
+			if channels := chatSession.storage.GetChannels(); len(channels) > 0 {
+				chatSession.sendMessage(types.BuildSysMsg(buildChannelList(channels), r.conn.ipAddr))
+				chatSession.sendMessage(types.BuildSysMsg("Channel's index: ", r.conn.ipAddr))
+				r.prevState = joiningState
+				r.state = selectChannelState
+			} else {
+				chatSession.sendMessage(types.BuildSysMsg("No channels were created", r.conn.ipAddr))
+			}
+			return
+		}
+		chatSession.sendMessage(types.BuildSysMsg("Authentication required", r.conn.ipAddr))
+
+	case listMembers:
+		if !matchState(r.state, joiningState) {
+			if members := chatSession.storage.GetParticipants(); len(members) > 0 {
+				chatSession.sendMessage(types.BuildSysMsg(buildMembersList(chatSession, members), r.conn.ipAddr))
+			}
+			r.prevState = r.state
+			r.state = acceptMessagesState
+			return
+		}
+		chatSession.sendMessage(types.BuildSysMsg("Authentication required", r.conn.ipAddr))
+
+	case exit:
+		r.state = disconnectState
+
+	default:
+		// Not setting the prevState so that then menu can be displayed.
+		chatSession.sendMessage(types.BuildSysMsg("Invalid option", r.conn.ipAddr))
+	}
+}
+
+func (r *readerFSM) onRegisterParticipantState(chatSession *session) {
+	if !matchState(r.state, registerParticipantState) {
+		log.Logger.Panic("Invalid state")
+	}
+
+	switch {
+	case matchSubstate(r.substate, readName):
+		r.conn.participant.Username = r.buffer.String()
+		r.substate = readEmail
+		chatSession.sendMessage(types.BuildSysMsg("Email: ", r.conn.ipAddr))
+
+	case matchSubstate(r.substate, readEmail):
+		r.conn.participant.Email = r.buffer.String()
+		r.substate = readPassword
+		chatSession.sendMessage(types.BuildSysMsg("Password: ", r.conn.ipAddr))
+
+	case matchSubstate(r.substate, readPassword):
+		r.conn.participant.Password = r.buffer.String()
+		r.substate = null
+		r.prevState = r.state
+		r.state = validateState
+	}
+}
+
+func (r *readerFSM) onAuthParticipantState(chatSession *session) {
+	if !matchState(r.state, authParticipantState) {
+		log.Logger.Panic("Invalid state")
+	}
+
+	switch {
+	case matchSubstate(r.substate, readName):
+		r.conn.participant.Username = r.buffer.String()
+		r.substate = readPassword
+		chatSession.sendMessage(types.BuildSysMsg("Password: ", r.conn.ipAddr))
+
+	case matchSubstate(r.substate, readPassword):
+		r.conn.participant.Password = r.buffer.String()
+		r.substate = null
+		r.prevState = r.state
+		r.state = validateState
+	}
+}
+
+func (r *readerFSM) onCreateChannelState(chatSession *session) {
+	if !matchState(r.state, createChannelState) {
+		log.Logger.Panic("Invalid state")
+	}
+
+	switch {
+	case matchSubstate(r.substate, readName):
+		r.conn.channel.Name = r.buffer.String()
+		r.substate = readDesc
+		chatSession.sendMessage(types.BuildSysMsg("Description: ", r.conn.ipAddr))
+
+	case matchSubstate(r.substate, readDesc):
+		r.conn.channel.Desc = r.buffer.String()
+		r.substate = null
+		r.prevState = r.state
+		r.state = acceptMessagesState
+	}
+}
+
+func (r *readerFSM) onValidateState(chatSession *session) {
+	if !matchState(r.state, validateState) {
+		log.Logger.Panic("Invalid state")
+	}
+
+	if !matchState(r.prevState, registerParticipantState) &&
+		!matchState(r.prevState, authParticipantState) &&
+		!matchState(r.prevState, createChannelState) {
+		log.Logger.Panic("Invalid prev state")
+	}
+
+	if !matchState(r.prevState, createChannelState) {
+
+		if !validation.ValidateName(r.conn.participant.Username) {
+			chatSession.sendMessage(
+				types.BuildSysMsg(util.Fmt("Username {%s} not valid", r.conn.participant.Username), r.conn.ipAddr),
+			)
+			return
+		}
+
+		if !validation.ValidatePassword(r.conn.participant.Password) {
+			chatSession.sendMessage(
+				types.BuildSysMsg(util.Fmt("Password {%s} not valid", r.conn.participant.Password), r.conn.ipAddr),
+			)
+			return
+		}
+
+		if matchState(r.prevState, registerParticipant) {
+			// TODO: Check whether it's a valid email address by sending a message.
+			if !validation.ValidateEmail(r.conn.participant.Email) {
+				chatSession.sendMessage(
+					types.BuildSysMsg(util.Fmt("Email {%s} not valid", r.conn.participant.Email), r.conn.ipAddr),
+				)
+			}
+
+			if chatSession.storage.HasParticipant(r.conn.participant.Username) {
+				chatSession.sendMessage(
+					types.BuildSysMsg(util.Fmt("Participant {%s} already exists", r.conn.participant.Username), r.conn.ipAddr),
+				)
+				r.substate = null
+				r.prevState = nullState
+				r.state = joiningState
+				return
+			}
+
+			r.conn.participant.JoinTime = util.TimeNowStr()
+
+			// TODO: Document this function in the architecture manual
+			r.conn.disconnectIfIdle()
+
+			chatSession.storage.RegisterParticipant(r.conn.participant)
+
+			// TODO: Document this thoroughly in the architecture manual.
+			chatSession.connMap.markAsConnected(r.conn.ipAddr)
+
+			// TODO: Display chat history
+			chatSession.storage.GetChatHistory()
+
+		} else {
+			if !chatSession.storage.AuthParticipant(r.conn.participant) {
+				chatSession.sendMessage(
+					types.BuildSysMsg(util.Fmt("Failed to authenticate participant {%s}. "+
+						"Username or password is incorrect.", r.conn.participant.Username), r.conn.ipAddr),
+				)
+				r.substate = null
+				r.prevState = nullState
+				r.state = joiningState
+				return
+			}
+
+			r.conn.participant.JoinTime = util.TimeNowStr()
+
+			// TODO: Document.
+			r.conn.disconnectIfIdle()
+
+			// TODO: Display chat history
+			chatSession.connMap.markAsConnected(r.conn.ipAddr)
+		}
+
+	} else {
+		// Channel validation
+		if !validation.ValidateName(r.conn.channel.Name) {
+			chatSession.sendMessage(
+				types.BuildSysMsg(util.Fmt("Channel name {%s} is invalid", r.conn.channel.Name), r.conn.ipAddr),
+			)
+			return
+		}
+	}
+
+	r.substate = null
+	r.prevState = r.state
+	r.state = acceptMessagesState
+	return
+}
+
+func (r *readerFSM) onSelectChannelState(chatSession *session) {
+	if !matchState(r.state, selectChannelState) {
+		log.Logger.Panic("Invalid state")
+	}
+
+	// TODO: Give a participant three attempts to select a channel,
+	// if he fails all of them, get back to displaying the menu. (Probably)
+	channelID, err := strconv.Atoi(r.buffer.String())
+	if err != nil {
+		chatSession.sendMessage(types.BuildSysMsg("Index {%s} is invalid", r.conn.ipAddr))
+		r.substate = null
+		r.state = processMenuState
+		return
+	}
+
+	channels := chatSession.storage.GetChannels()
+	if channelID > 0 && channelID < len(channels) {
+		// Fine as long as nobody uses the information about the channel rather than the reader itself.
+		// If we, for example, relied on channel's name in broadcastMessages procedure,
+		// the next line would cause race-conditions.
+		r.conn.channel = channels[channelID]
+
+		if history := chatSession.storage.GetChannelHistory(r.conn.channel.Name); len(history) > 0 {
+			chatSession.sendMessage(types.BuildSysMsg(buildChatHistory(history), r.conn.ipAddr))
+		}
+
+		r.prevState = r.state
+		r.substate = null
+		r.state = acceptMessagesState
+
+		return
+	}
+
+	chatSession.sendMessage(
+		types.BuildSysMsg(util.Fmt("ChannelID {%s} is out of range", channelID), r.conn.ipAddr),
+	)
+
+	r.substate = null
+	r.state = processMenuState
+}
+
+func (r *readerFSM) onAcceptMessagesState(chatSession *session) {
+	if !matchState(r.state, acceptMessagesState) {
+		log.Logger.Panic("Invalid state")
+	}
+
+	// r.conn.abortChan
+
+	var msg *types.ChatMessage
+
+	if r.conn.channel.Name != "" {
+		msg = types.BuildChatMsg(r.buffer.Bytes(), r.conn.participant.Username, r.conn.channel.Name)
+	} else {
+		msg = types.BuildChatMsg(r.buffer.Bytes(), r.conn.participant.Username)
+	}
+
+	chatSession.storage.StoreMessage(msg)
+	chatSession.sendMessage(msg)
+}
+
+func (r *readerFSM) onDisconnectState(chatSession *session) {
+	if !matchState(r.state, disconnectState) {
+		log.Logger.Panic("Invalid state")
+	}
+
+	if r.conn.participant.Username != "" {
+		chatSession.sendMessage(
+			types.BuildSysMsg(util.Fmt("Participant {%s} disconnected", r.conn.participant.Username)),
+		)
+	}
+
+	r.conn.netConn.Close()
+	chatSession.connMap.removeConn(r.conn.ipAddr)
+}
+
+func buildChatHistory(history []*types.ChatMessage) string {
+	var builder strings.Builder
+	for _, msg := range history {
+		message := util.Fmt("{%s:%s} %s", msg.Sender, msg.SentTime, msg.Contents.String())
+		builder.WriteString(message)
+	}
+	return builder.String()
+}
+
+func buildChannelList(channels []*types.Channel) string {
+	var builder strings.Builder
+
+	builder.WriteString("channels:\n")
+	for index, channel := range channels {
+		message := util.Fmt("\t{%d} :%s\n", index, channel.Name)
+		builder.WriteString(message)
+	}
+	return builder.String()
+}
+
+func buildMembersList(chatSession *session, members []*types.Participant) string {
+	var builder strings.Builder
+	// Iterate over all the participants in a storage,
+	// check whether they are in a connection map to verify which status to display
+	// `online` or `offline`. If a paticipant is present in a connection map
+	// and its status is not Pending, that is online, otherwise offline.
+	builder.WriteString("members:\n")
+	for _, member := range members {
+		if chatSession.connMap.hasConnectedParticipant(member.Username) {
+			builder.WriteString(util.Fmt("\t{%-64s} *%s\n", member.Username, connStateTable[connectedState]))
+			continue
+		}
+		builder.WriteString(util.Fmt("\t{%-64s} *%s\n", member.Username, connStateTable[pendingState]))
+	}
+	return builder.String()
+}

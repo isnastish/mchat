@@ -50,7 +50,7 @@ func (m *MemoryBackend) RegisterParticipant(participant *types.Participant) {
 		log.Logger.Panic("Participant %s already exists", participant.Username)
 	}
 
-	passwordHash := utilities.Sha256Checksum([]byte(participant.Password))
+	passwordHash := util.Sha256Checksum([]byte(participant.Password))
 	if !validation.ValidatePasswordSha256(passwordHash) {
 		log.Logger.Panic("Password hash validation failed")
 	}
@@ -71,7 +71,7 @@ func (m *MemoryBackend) AuthParticipant(participant *types.Participant) bool {
 
 	participant, exists := m.participants[participant.Username]
 	if exists {
-		passwordHash := utilities.Sha256Checksum([]byte(participant.Password))
+		passwordHash := util.Sha256Checksum([]byte(participant.Password))
 		return strings.EqualFold(participant.Password, passwordHash)
 	}
 

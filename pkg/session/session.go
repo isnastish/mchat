@@ -1,11 +1,10 @@
+// TODO: Improve metrics (probably redesign).
+// TODO: Pass settings for redis and dynamoDB backends (should be part of Config).
 package session
 
 import (
-	"fmt"
-	"io"
 	"net"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/isnastish/chat/pkg/backend"
@@ -17,10 +16,13 @@ import (
 )
 
 type Config struct {
-	Network     string // tcp|udp
+	Network     string
 	Addr        string
 	BackendType backend.BackendType
-	Timeout     time.Duration
+	// The timeout should be disable in a production,
+	// but in development it simplifies testing.
+	SessionTimeout     int64
+	ParticipantTimeout int64
 }
 
 type metrics struct {
@@ -32,18 +34,16 @@ type metrics struct {
 }
 
 type session struct {
-	config           Config
-	listener         net.Listener
-	connMap          *connectionMap
-	timeoutClock     *time.Timer
-	timeoutDuration  time.Duration
-	timeoutAbortChan chan struct{}
-	chatMessagesChan chan *types.ChatMessage
-	sysMessagesChan  chan *types.SysMessage
-	quitChan         chan struct{}
-	storage          backend.Backend
-	metrics          metrics
-	running          bool
+	config                 Config
+	listener               net.Listener
+	connMap                *connectionMap
+	shutdownTimer          *time.Timer
+	shutdownSignal         chan struct{}
+	triggerShutdownProcess chan struct{}
+	chatMessages           chan *types.ChatMessage
+	sysMessages            chan *types.SysMessage
+	storage                backend.Backend
+	metrics                metrics
 }
 
 func CreateSession(config Config) *session {
@@ -51,10 +51,6 @@ func CreateSession(config Config) *session {
 	if err != nil {
 		log.Logger.Error("Listener creation failed: %v", err)
 		os.Exit(1)
-	}
-
-	if config.Timeout == 0 {
-		config.Timeout = 86400 * time.Second // 24h
 	}
 
 	var storage backend.Backend
@@ -82,16 +78,15 @@ func CreateSession(config Config) *session {
 	}
 
 	session := &session{
-		connMap:          newConnectionMap(),
-		timeoutClock:     time.NewTimer(config.Timeout),
-		timeoutDuration:  config.Timeout,
-		timeoutAbortChan: make(chan struct{}),
-		listener:         listener,
-		chatMessagesChan: make(chan *types.ChatMessage),
-		sysMessagesChan:  make(chan *types.SysMessage),
-		quitChan:         make(chan struct{}),
-		config:           config,
-		storage:          storage,
+		connMap:                newConnectionMap(),
+		shutdownTimer:          time.NewTimer(time.Duration(config.SessionTimeout)),
+		shutdownSignal:         make(chan struct{}),
+		triggerShutdownProcess: make(chan struct{}),
+		listener:               listener,
+		chatMessages:           make(chan *types.ChatMessage),
+		sysMessages:            make(chan *types.SysMessage),
+		config:                 config,
+		storage:                storage,
 	}
 
 	return session
@@ -100,22 +95,26 @@ func CreateSession(config Config) *session {
 func (s *session) Run() {
 	go s.processMessages()
 	go func() {
-		<-s.timeoutAbortChan
-		close(s.quitChan)
+		// Block the shutdown process until a signal is received on a triggerShutdownSignal channle.
+		<-s.triggerShutdownProcess
+		// Used as an identifier to distinguish who shutted down the session.
+		s.shutdownSignal <- struct{}{}
+		// Causes the Accept() function to produce an error
+		// so we can shut down the session gracefully.
 		s.listener.Close()
 	}()
 	log.Logger.Info("Listening: %s", s.listener.Addr().String())
 
-Loop:
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
 			select {
-			// terminate the session if no participants connected
-			// for the whole timeout duration.
-			case <-s.quitChan:
-				log.Logger.Info("Session shut down")
-				break Loop
+			// Shut down the session if no paticipants joined for the specified
+			// time limit. The shutdownSignal channel is used to distinguish between
+			// an ordinary error and our `request` to shut down the session.
+			case <-s.shutdownSignal:
+				log.Logger.Info("Nobody was able able connect. Shutting down the session")
+				return
 			default:
 				log.Logger.Warn("Connection %s aborted", conn.RemoteAddr().String())
 			}
@@ -124,455 +123,92 @@ Loop:
 
 		log.Logger.Info("Connected: %s", conn.RemoteAddr().String())
 
-		s.connMap.addConn(&connection{
-			conn:        conn,
-			ipAddr:      conn.RemoteAddr().String(),
-			state:       Pending,
-			participant: nil,
-		})
+		connection := newConn(conn, time.Duration(s.config.ParticipantTimeout))
+		s.connMap.addConn(connection)
+		go s.handleConnection(connection)
 
-		go s.handleConnection(conn)
-		s.timeoutClock.Stop()
+		s.shutdownTimer.Stop()
 	}
 }
 
-func (s *session) handleConnection(conn net.Conn) {
-	session.m.joined++
+func (s *session) sendMessage(msg interface{}) {
+	switch msg.(type) {
+	case *types.SysMessage:
+		s.sysMessages <- msg.(*types.SysMessage)
 
-	connIpAddr := conn.RemoteAddr().String()
+	case *types.ChatMessage:
+		s.chatMessages <- msg.(*types.ChatMessage)
 
-	receiver := []string{connIpAddr}
+	default:
+		log.Logger.Panic("Invalid message type")
+	}
+}
 
-	// create a new reader(FSM) to handle all the input read from a connection
-	reader := newReader(conn, connIpAddr, time.Second*60*24)
-	go reader.disconnectIfIdle()
+func (s *session) handleConnection(conn *connection) {
+	reader := newReader(conn)
 
-	for !reader.isState(Disconnecting) {
-		if reader.isState(ProcessingMenu) {
-			menu := buildMenu(session)
-			session.systemMessagesCh <- backend.MakeSystemMessage([]byte(menu), []string{connIpAddr})
+	for {
+		if matchState(reader.state, joiningState) || matchState(reader.state, processMenuState) {
+			if !matchState(reader.prevState, joiningState) {
+				s.sendMessage(types.BuildSysMsg(optionsStr, reader.conn.ipAddr))
+			}
 		}
 
-		if err := reader.read(); (err != nil) && (err != io.EOF) {
-			select {
-			case <-reader.idleConnectionsCh:
-				// Notify idle participant that it will be disconnected
-				// due to staying idle for too long.
-				session.systemMessagesCh <- backend.MakeSystemMessage([]byte("disconnecting..."), receiver)
-			default:
-				close(reader.quitSignalCh)
-			}
-			reader.state = Disconnecting
+		reader.read(s)
+
+		switch {
+		case matchState(reader.state, joiningState):
+			reader.onJoiningState(s)
+
+		case matchState(reader.state, processMenuState):
+			reader.onJoiningState(s)
+
+		case matchState(reader.state, registerParticipantState):
+			reader.onRegisterParticipantState(s)
+
+		case matchState(reader.state, authParticipantState):
+			reader.onAuthParticipantState(s)
+
+		case matchState(reader.state, createChannelState):
+			reader.onCreateChannelState(s)
+
+		case matchState(reader.state, selectChannelState):
+			reader.onSelectChannelState(s)
+
+		case matchState(reader.state, validateState):
+			reader.onValidateState(s)
+
+		case matchState(reader.state, acceptMessagesState):
+			reader.onAcceptMessagesState(s)
 		}
 
-		// NOTE: When an opposite side closes the connection, we read zero bytes.
-		// In that case we have to stop disconnectIfIdle function and
-		// set the state to Disconnecting.
-		if !reader.isState(Disconnecting) && reader.buffer.Len() == 0 {
-			close(reader.quitSignalCh)
-			reader.state = Disconnecting
-		}
-
-		if reader.isState(ProcessingMenu) {
-			logger.Info("processing menu")
-
-			option, err := strconv.Atoi(reader.buffer.String())
-			if err != nil {
-				session.systemMessagesCh <- backend.MakeSystemMessage(
-					[]byte(fmt.Sprintf("option {%s} is not supported", reader.buffer.String())),
-					receiver,
-				)
-				continue
-			}
-
-			switch MenuOptionType(option) {
-			case RegisterParticipant:
-				if !reader.isConnected {
-					logger.Info("registering new participant")
-
-					reader.state = RegisteringNewParticipant
-					reader.substate = ProcessingName
-					session.systemMessagesCh <- backend.MakeSystemMessage(usernameMessageContents, receiver)
-				} else {
-					session.systemMessagesCh <- backend.MakeSystemMessage(
-						[]byte("already registered"),
-						receiver,
-					)
-				}
-
-			case AuthenticateParticipant:
-				if !reader.isConnected {
-					logger.Info("authenticating participant")
-
-					reader.state = AuthenticatingParticipant
-					reader.substate = ProcessingName
-					session.systemMessagesCh <- backend.MakeSystemMessage(usernameMessageContents, receiver)
-				} else {
-					session.systemMessagesCh <- backend.MakeSystemMessage(
-						[]byte("already authenticated"),
-						receiver,
-					)
-				}
-
-			case CreateChannel:
-				if !reader.isConnected {
-					session.systemMessagesCh <- backend.MakeSystemMessage(
-						[]byte("cannot create a channel, authentication is required"),
-						receiver,
-					)
-				} else {
-					logger.Info("creating channel")
-
-					reader.state = CreatingNewChannel
-					reader.substate = ProcessingName
-					session.systemMessagesCh <- backend.MakeSystemMessage(
-						channelsNameMessageContents,
-						receiver,
-					)
-				}
-
-			case SelectChannel:
-				if !reader.isConnected {
-					session.systemMessagesCh <- backend.MakeSystemMessage(
-						[]byte("cannot select a channel, authentication is required"),
-						receiver,
-					)
-				} else {
-					logger.Info("selecting channel")
-
-					reader.state = SelectingChannel
-					empty, channelList := buildChannelList(session)
-					if !empty {
-						session.systemMessagesCh <- backend.MakeSystemMessage(
-							[]byte(channelList),
-							receiver,
-						)
-					} else {
-						session.systemMessagesCh <- backend.MakeSystemMessage(
-							[]byte(CR("no channels were created yet")),
-							receiver,
-						)
-					}
-				}
-
-			case Exit:
-				logger.Info("exiting session")
-				reader.state = Disconnecting
-
-			default:
-				logger.Info("unknown option")
-				// If participant's input doesn't match any option,
-				// sent a message that an option is not supported.
-				contents := []byte(CR(fmt.Sprintf("option {%s} is not supported", reader.buffer.String())))
-				session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
-			}
-
-		} else if reader.isState(RegisteringNewParticipant) {
-			if reader.isSubstate(ProcessingName) {
-				reader.substate = ProcessingParticipantsEmailAddress
-				reader.participantName = reader.buffer.String()
-				session.systemMessagesCh <- backend.MakeSystemMessage(emailAddressMessageContents, receiver)
-			} else if reader.isSubstate(ProcessingParticipantsEmailAddress) {
-				reader.substate = ProcessingParticipantsPassword
-				reader.participantEmailAddress = reader.buffer.String()
-				session.systemMessagesCh <- backend.MakeSystemMessage(passwordMessageContents, receiver)
-			} else if reader.isSubstate(ProcessingParticipantsPassword) {
-				// TODO(alx): Move validation into a separate function so we don't duplicate
-				// the code in multiple states.
-				validationSucceeded := false
-				if validateName(reader.participantName) {
-					if validateEmailAddress(reader.participantEmailAddress) {
-						if validatePassword(reader.buffer.String()) {
-							validationSucceeded = true
-						} else {
-							session.systemMessagesCh <- backend.MakeSystemMessage(
-								passwordValidationFailedMessageContents,
-								receiver,
-							)
-						}
-					} else {
-						session.systemMessagesCh <- backend.MakeSystemMessage(
-							emailAddressValidationFailedMessageContents,
-							receiver,
-						)
-					}
-				} else {
-					session.systemMessagesCh <- backend.MakeSystemMessage(
-						usernameValidationFailedMessageContents,
-						receiver,
-					)
-				}
-
-				if validationSucceeded {
-					if !session.storage.HasParticipant(reader.participantName) {
-						// NOTE: It's a desired behaviour that we don't specify password and email
-						// address, only the name. The comparison while broadcasting messages will
-						// be done using a name rather than any other data.
-						session.connections.assignParticipant(
-							connIpAddr,
-							&backend.Participant{
-								Name:     reader.participantName,
-								JoinTime: time.Now().Format(time.DateTime),
-							},
-						)
-
-						// Display a chat history
-						empty, history := buildChatHistory(session)
-						if !empty {
-							session.systemMessagesCh <- backend.MakeSystemMessage(
-								[]byte(history),
-								receiver,
-							)
-						}
-
-						// Display a participant list
-						empty, participantList := buildParticipantList(session)
-						if !empty {
-							session.systemMessagesCh <- backend.MakeSystemMessage(
-								[]byte(participantList),
-								receiver,
-							)
-						}
-
-						// NOTE: Register this participant after so that the current participant is not
-						// included into participant list being displayed.
-						reader.participantPasswordSha256 = Sha256(reader.buffer.Bytes())
-						session.storage.RegisterParticipant(
-							reader.participantName,
-							reader.participantPasswordSha256,
-							reader.participantEmailAddress,
-						)
-
-						// Set the state to accept new messages
-						reader.state = AcceptingMessages
-						reader.substate = NotSet
-
-					} else {
-						reader.state = ProcessingMenu
-						reader.substate = NotSet
-
-						session.systemMessagesCh <- backend.MakeSystemMessage(
-							[]byte(CR(fmt.Sprintf("participant {%s} already exists", reader.participantName))),
-							receiver,
-						)
-					}
-				} else {
-					reader.state = ProcessingMenu
-					reader.substate = NotSet
-				}
-			}
-		} else if reader.isState(AuthenticatingParticipant) {
-			if reader.isSubstate(ProcessingName) {
-				reader.substate = ProcessingParticipantsPassword
-				reader.participantName = reader.buffer.String()
-				session.systemMessagesCh <- backend.MakeSystemMessage(
-					passwordMessageContents,
-					receiver,
-				)
-			} else if reader.isSubstate(ProcessingParticipantsPassword) {
-				validationSucceeded := true
-				if validateName(reader.participantName) {
-					if validatePassword(reader.buffer.String()) {
-						validationSucceeded = true
-					} else {
-						session.systemMessagesCh <- backend.MakeSystemMessage(
-							passwordValidationFailedMessageContents,
-							receiver,
-						)
-					}
-				} else {
-					session.systemMessagesCh <- backend.MakeSystemMessage(
-						usernameValidationFailedMessageContents,
-						receiver,
-					)
-				}
-
-				if validationSucceeded {
-					reader.participantPasswordSha256 = Sha256(reader.buffer.Bytes())
-					// TODO(alx): Add hashed password validation.
-
-					if session.storage.AuthParticipant(reader.participantName, reader.participantPasswordSha256) {
-						reader.state = AcceptingMessages
-
-						empty, chatHistory := buildChatHistory(session)
-						if !empty {
-							session.systemMessagesCh <- backend.MakeSystemMessage(
-								[]byte(chatHistory),
-								receiver,
-							)
-						}
-
-						// TODO(alx): We should exclude itself from a participant list.
-						empty, participantList := buildParticipantList(session)
-						if !empty {
-							session.systemMessagesCh <- backend.MakeSystemMessage(
-								[]byte(participantList),
-								receiver,
-							)
-						}
-					} else {
-						reader.substate = NotSet
-						session.systemMessagesCh <- backend.MakeSystemMessage(
-							[]byte(CR("authentication failed, name or password is incorrect")),
-							receiver,
-						)
-					}
-				} else {
-					reader.state = ProcessingMenu
-					reader.substate = NotSet
-				}
-			}
-		} else if reader.isState(AcceptingMessages) {
-			if reader.channelIsSet {
-				session.storage.StoreMessage(
-					reader.participantName,
-					time.Now().Format(time.DateTime),
-					reader.buffer.Bytes(), reader.curChannel.Name,
-				)
-				session.participantMessagesCh <- backend.MakeParticipantMessage(
-					reader.buffer.Bytes(),
-					reader.participantName,
-					reader.curChannel.Name,
-				)
-			} else {
-				session.storage.StoreMessage(
-					reader.participantName,
-					time.Now().Format(time.DateTime),
-					reader.buffer.Bytes(),
-				)
-
-				// TODO(alx): Figure out a better way of CRLF to a message.
-				session.participantMessagesCh <- backend.MakeParticipantMessage(
-					[]byte(CR(reader.buffer.String())),
-					reader.participantName,
-				)
-			}
-
-			session.m.receivedMessages++
-
-		} else if reader.isState(CreatingNewChannel) {
-			// TODO(alx): What if the channel has already been created?
-			// channelIsSet is equal to True?
-			if validateName(reader.buffer.String()) {
-				if reader.isSubstate(ProcessingName) {
-					reader.curChannel.Name = reader.buffer.String()
-					reader.substate = ProcessingChannelsDesc
-
-					session.systemMessagesCh <- backend.MakeSystemMessage(
-						channelsDescMessageContents,
-						receiver,
-					)
-				} else if reader.isSubstate(ProcessingChannelsDesc) {
-					reader.curChannel.Desc = reader.buffer.String()
-					if session.storage.HasChannel(reader.curChannel.Name) {
-						contents := []byte(CR(fmt.Sprintf("channel {%s} aready exists", reader.curChannel.Name)))
-						session.systemMessagesCh <- backend.MakeSystemMessage(contents, receiver)
-						reader.state = ProcessingMenu
-					} else {
-						session.storage.RegisterChannel(
-							reader.curChannel.Name,
-							reader.curChannel.Desc,
-							reader.participantName,
-						)
-						reader.state = AcceptingMessages
-					}
-				}
-			} else {
-				reader.state = CreatingNewChannel
-				reader.substate = NotSet
-				session.systemMessagesCh <- backend.MakeSystemMessage(
-					[]byte("channel's name validation failed, try a different name"),
-					receiver,
-				)
-			}
-		} else if reader.isState(SelectingChannel) {
-			// TODO(alx): What if while we were in a process of selecting a channel,
-			// another channel has been created or deleted?
-			// The problem only arises when the owner has deleted a channel,
-			// with creating new onces the index will be incremented and won't affect our selection.
-			// Let's ignore the deletion process for now.
-			index, err := strconv.Atoi(reader.buffer.String())
-			if err != nil {
-				_, channelList := buildChannelList(session)
-				session.systemMessagesCh <- backend.MakeSystemMessage(
-					[]byte(CR(fmt.Sprintf("input {%s} doesn't match any channels", reader.buffer.String()))),
-					receiver,
-				)
-				session.systemMessagesCh <- backend.MakeSystemMessage(
-					[]byte(channelList),
-					receiver,
-				)
-			} else {
-				channels := session.storage.GetChannels()
-				channelsCount := len(channels)
-				if index < channelsCount || index >= channelsCount {
-
-				} else {
-					ch := channels[index]
-					reader.curChannel = backend.Channel{
-						Name:         ch.Name,
-						Desc:         ch.Desc,
-						CreationDate: ch.CreationDate,
-					}
-
-					reader.channelIsSet = true
-
-					// Sent a message to the participant containing the chat history in this channel.
-					empty, chatHistory := buildChatHistory(session, ch.Name)
-					if !empty {
-						session.systemMessagesCh <- backend.MakeSystemMessage(
-							[]byte(chatHistory),
-							receiver,
-						)
-					}
-				}
-			}
+		if matchState(reader.state, disconnectState) {
+			reader.onDisconnectState(s)
+			break
 		}
 	}
 
-	// If a participant was able to connect, sent a message to all
-	// other participants that it was disconnected.
-	if reader.isConnected {
-		contents := []byte(CR(fmt.Sprintf("{%s} disconnected", reader.participantName)))
-		session.systemMessagesCh <- backend.MakeSystemMessage(contents, []string{})
-	}
-
-	// Remove this connection from a connections map regardless whether
-	// it succeeded to authenticate or not.
-	session.connections.removeConn(connIpAddr)
-	conn.Close()
-
-	// since this participant has disconnected, decrement the number of
-	// connected participants
-	session.m.left++
-
-	// reset session's timeout timer if the amount of connected participants went back to zero
-	if session.connections.count() == 0 {
-		session.timeoutClock.Reset(session.timeoutDuration)
+	if s.connMap.empty() {
+		s.shutdownTimer.Reset(time.Duration(s.config.SessionTimeout))
 	}
 }
 
 func (s *session) processMessages() {
-	s.running = true
-	for s.running {
+	for {
 		select {
-		case message := <-s.chatMessagesChan:
-			log.Logger.Info("Broadcasting participant's message")
-
-			broadcasted := s.connections.broadcastMessage(message, types.ChatMessageType)
+		case msg := <-s.chatMessages:
+			log.Logger.Info("Broadcasting participant message")
+			broadcasted := s.connMap.broadcastMessage(msg)
 			s.metrics.broadcastedChatMessages += broadcasted
 
-		case message := <-s.sysMessagesChan:
+		case msg := <-s.sysMessages:
 			log.Logger.Info("Broadcasting system message")
-
-			sent := s.connections.broadcastMessage(message, types.SysMessageType)
+			sent := s.connMap.broadcastMessage(msg)
 			s.metrics.sentSysMessages = sent
 
-		case <-s.timeoutClock.C:
-			log.Logger.Info("Session timeout")
-
-			s.running = false
-			close(s.timeoutAbortChan)
+		case <-s.shutdownTimer.C:
+			s.triggerShutdownProcess <- struct{}{}
+			return
 		}
 	}
 }

@@ -94,8 +94,8 @@ func TestValidateHashedPassword(t *testing.T) {
 	assert.False(t, ValidatePasswordSha256("C2161G0622EA40C42CFBCD7B9E1E57CC4CB26C520C722AE9BFB4BC2AF84BCDA5"))                                                                 // contains invalid character
 
 	// valid hashed passwords
-	assert.True(t, ValidatePasswordSha256(utilities.Sha256Checksum([]byte("some_bytes_here"))))
-	assert.True(t, ValidatePasswordSha256(utilities.Sha256Checksum([]byte("4orYouWillDoe5erThings@"))))
+	assert.True(t, ValidatePasswordSha256(util.Sha256Checksum([]byte("some_bytes_here"))))
+	assert.True(t, ValidatePasswordSha256(util.Sha256Checksum([]byte("4orYouWillDoe5erThings@"))))
 	assert.True(t, ValidatePasswordSha256("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"))
 	assert.True(t, ValidatePasswordSha256("0000000000000000000000000000000000000000000000000000000000000000"))
 	assert.True(t, ValidatePasswordSha256("9BBAFAEEA0E53711CD6C123ADBDAC236957143E306ADC37B4A1C15E6B1CBD0A3"))

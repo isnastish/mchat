@@ -3,6 +3,7 @@
 // TODO: Implement metrics using prometheus or grafana.
 // TODO: Explore Redis' transactions, maybe we wouldn't have to maintain a mutex.
 // TODO: GetChatHistory and GetChannelHistory have some duplications, they have to be combined into a single function.
+// TODO: Add metrics using otel (opentelementry).
 package redis
 
 import (
@@ -67,7 +68,7 @@ func (r *RedisBackend) RegisterParticipant(participant *types.Participant) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	passwordHash := utilities.Sha256Checksum([]byte(participant.Password))
+	passwordHash := util.Sha256Checksum([]byte(participant.Password))
 	if !validation.ValidatePasswordSha256(passwordHash) {
 		log.Logger.Panic("Failed to register participant %s. Password validation failed", participant.Username)
 	}
@@ -79,7 +80,7 @@ func (r *RedisBackend) RegisterParticipant(participant *types.Participant) {
 	}
 
 	// Not sure whether we need to hash a participant's username in order to use it as a key.
-	participantHash := utilities.Sha256Checksum([]byte(participant.Username))
+	participantHash := util.Sha256Checksum([]byte(participant.Username))
 
 	value := reflect.ValueOf(participant).Elem()
 	for i := 0; i < value.NumField(); i++ {
@@ -112,7 +113,7 @@ func (r *RedisBackend) deleteParticipant(username string) {
 
 	if r.doesParticipantExist(username) {
 		r.client.SRem(r.ctx, "participants:", username)
-		participantHash := utilities.Sha256Checksum([]byte(username))
+		participantHash := util.Sha256Checksum([]byte(username))
 		r.client.Del(r.ctx, participantHash)
 
 		log.Logger.Info("Participant %s was deleted", username)
@@ -124,14 +125,14 @@ func (r *RedisBackend) AuthParticipant(participant *types.Participant) bool {
 	defer r.mu.RUnlock()
 
 	if r.doesParticipantExist(participant.Username) {
-		participantHash := utilities.Sha256Checksum([]byte(participant.Username))
+		participantHash := util.Sha256Checksum([]byte(participant.Username))
 
 		// NOTE: This has to be in sync with types.Participant struct because it relies on the order of fields.
 		// Field(1) is expected to correspond to the Password field inside that struct.
 		passwordFiledName := reflect.TypeOf(participant).Elem().Field(1).Name
 		passwordHash := r.client.HGet(r.ctx, participantHash, passwordFiledName)
 		if passwordHash.Val() != "" {
-			return strings.EqualFold(utilities.Sha256Checksum([]byte(participant.Password)), passwordHash.Val())
+			return strings.EqualFold(util.Sha256Checksum([]byte(participant.Password)), passwordHash.Val())
 		}
 	}
 
@@ -260,7 +261,7 @@ func (r *RedisBackend) RegisterChannel(channel *types.Channel) {
 		log.Logger.Panic("Channel %s already exists", channel.Name)
 	}
 
-	channelHash := utilities.Sha256Checksum([]byte(channel.Name))
+	channelHash := util.Sha256Checksum([]byte(channel.Name))
 
 	value := reflect.ValueOf(channel).Elem()
 	for i := 0; i < value.NumField(); i++ {
@@ -287,7 +288,7 @@ func (r *RedisBackend) DeleteChannel(channelname string) bool {
 
 	if r.doesChannelExist(channelname) {
 		r.client.SRem(r.ctx, "channels:", channelname)
-		channelHash := utilities.Sha256Checksum([]byte(channelname))
+		channelHash := util.Sha256Checksum([]byte(channelname))
 		r.client.Del(r.ctx, channelHash)
 		log.Logger.Info("Channel %s was deleted", channelname)
 
@@ -350,7 +351,7 @@ func (r *RedisBackend) GetChannels() []*types.Channel {
 	channels := make([]*types.Channel, 0, len(members.Val()))
 
 	for _, channelName := range members.Val() {
-		channelHash := utilities.Sha256Checksum([]byte(channelName))
+		channelHash := util.Sha256Checksum([]byte(channelName))
 
 		data := r.client.HGetAll(r.ctx, channelHash)
 		if len(data.Val()) == 0 {
@@ -389,7 +390,7 @@ func (r *RedisBackend) GetParticipants() []*types.Participant {
 	participants := make([]*types.Participant, 0, len(members.Val()))
 
 	for _, participantUsername := range members.Val() {
-		participantHash := utilities.Sha256Checksum([]byte(participantUsername))
+		participantHash := util.Sha256Checksum([]byte(participantUsername))
 
 		data := r.client.HGetAll(r.ctx, participantHash)
 		if len(data.Val()) == 0 {

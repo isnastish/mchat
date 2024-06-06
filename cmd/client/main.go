@@ -1,24 +1,20 @@
+// TODO: Specify port seprately from the address?
 package main
 
 import (
 	"flag"
-	"fmt"
+
 	"github.com/isnastish/chat/pkg/client"
 )
 
 func main() {
-	var network string
-	var address string
+	config := client.Config{}
 
-	flag.StringVar(&network, "network", "tcp", "Network protocol [TCP|UDP]")
-	flag.StringVar(&address, "address", "127.0.0.1:5000", "Address, for example: localhost:8080")
-
+	flag.StringVar(&config.Network, "network", "tcp", "Network protocol [TCP|UDP]")
+	flag.StringVar(&config.Addr, "address", "127.0.0.1:8080", "Address, for example: 127.0.0.1")
+	flag.IntVar(&config.RetriesCount, "retriesCount", 5, "The amount of attempts a client would make to connect to a server")
 	flag.Parse()
 
-	c, err := client.NewClient(network, address)
-	if err != nil {
-		fmt.Printf("failed to create a client: %s\n", err.Error())
-		return
-	}
-	c.Run()
+	client := client.CreateClient(&config)
+	client.Run()
 }

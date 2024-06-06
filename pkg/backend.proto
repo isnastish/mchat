@@ -1,0 +1,13 @@
+syntax = "proto3";
+package chat.backend;
+
+message Participant {
+    string username = 1;
+    string password = 2;
+	string email = 3;
+	string joinTime = 4; 
+}
+
+service BackendStorage {
+    rpc HasParticipant(ParticipantName) returns (bool);
+}
