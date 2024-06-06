@@ -2,8 +2,11 @@
 package redis
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -138,4 +141,20 @@ func TestStoreChannelMessages(t *testing.T) {
 
 	channelHistory := b.GetChannelHistory(testsetup.Channels[0].Name)
 	assert.True(t, testsetup.Match(channelHistory, testsetup.BooksChannelMessages, testsetup.ContainsMessage))
+}
+
+func TestCtxCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-ctx.Done()
+		fmt.Println("func A was released")
+	}()
+	go func() {
+		<-ctx.Done()
+		fmt.Println("func B was released")
+	}()
+
+	<-time.After(2 * time.Second)
+	cancel()
+	cancel()
 }

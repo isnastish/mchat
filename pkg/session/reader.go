@@ -1,4 +1,6 @@
 // TODO: Add an ability to remove participants from the chat.
+// TODO: Write an implementation of the bytes buffer so we don't allocate memory on each frame
+// but rather reuse the memmory from the previous read by read() procedure.
 package session
 
 import (
@@ -103,26 +105,38 @@ func matchSubstate(substateA, substateB readerSubstate) bool {
 }
 
 func (r *readerFSM) read(chatSession *session) {
+	// net.Conn.Read() method accepts the bytes of non-zero length,
+	// thus creating a bytes.Buffer{} and passing it as buffer.Bytes() wouldn't work.
+	// The subsequent operation on the buffer.Len() would return 1024 instead of an actual amount of bytes read from a connection.
 	buffer := make([]byte, 1024)
 	bytesRead, err := r.conn.netConn.Read(buffer)
-	trimmedBuffer := []byte(strings.Trim(string(buffer[:bytesRead]), " \r\n\v\t\f"))
+	trimmedBuffer := util.TrimWhitespaces(buffer[:bytesRead])
 	r.buffer = bytes.NewBuffer(trimmedBuffer)
 
 	if err != nil && err != io.EOF {
 		select {
-		case <-r.conn.idleConnChan:
-			chatSession.sendMessage(types.BuildSysMsg("Disconnecting due to being idle", r.conn.ipAddr))
-
+		case <-r.conn.ctx.Done():
+			// Send a message to the client notifying that he has been idle for too long.
+			// The timeout duration is set by the session.
+			// The client gets disconnected.
+			chatSession.sendMessage(
+				types.BuildSysMsg("You were idle for too long, disconnecting...", r.conn.ipAddr),
+			)
 		default:
-			close(r.conn.quitChan)
+			// The cancel will unclock dissconnetIfIdle() procedure so it can finish gracefully
+			// without go routine leaks. The case above won't be invoked, since we've already reached
+			// the default statement and the state of the reader would be set to disconnectedState.
+			// Thus, the next read() never going to happen.
+			r.conn.cancel()
 		}
 
 		r.state = disconnectState
 		return
 	}
 
-	if r.buffer.Len() == 0 {
-		close(r.conn.quitChan)
+	// This conditions occurs when an opposite side closed the connection itself.
+	// net.Conn.Close() was called.
+	if bytesRead == 0 {
 		r.state = disconnectState
 	}
 }
@@ -356,7 +370,6 @@ func (r *readerFSM) onValidateState(chatSession *session) {
 	r.substate = null
 	r.prevState = r.state
 	r.state = acceptMessagesState
-	return
 }
 
 func (r *readerFSM) onSelectChannelState(chatSession *session) {
@@ -393,7 +406,7 @@ func (r *readerFSM) onSelectChannelState(chatSession *session) {
 	}
 
 	chatSession.sendMessage(
-		types.BuildSysMsg(util.Fmt("ChannelID {%s} is out of range", channelID), r.conn.ipAddr),
+		types.BuildSysMsg(util.Fmt("ChannelID {%d} is out of range", channelID), r.conn.ipAddr),
 	)
 
 	r.substate = null
@@ -405,7 +418,9 @@ func (r *readerFSM) onAcceptMessagesState(chatSession *session) {
 		log.Logger.Panic("Invalid state")
 	}
 
-	// r.conn.abortChan
+	// The session has received a message from the client, thus the timout process
+	// has to be aborted. We send a signal to the abortConnectionTimeout channel which resets.
+	close(r.conn.abortConnectionTimeout)
 
 	var msg *types.ChatMessage
 
@@ -429,6 +444,11 @@ func (r *readerFSM) onDisconnectState(chatSession *session) {
 			types.BuildSysMsg(util.Fmt("Participant {%s} disconnected", r.conn.participant.Username)),
 		)
 	}
+
+	// If the context hasn't been canceled yet. Probably the client has chosen to exit the session.
+	// We need to invoke cancel() procedure in order for the disconnectIfIdle() goroutine to finish.
+	// That prevents us from having go leaks.
+	r.conn.cancel()
 
 	r.conn.netConn.Close()
 	chatSession.connMap.removeConn(r.conn.ipAddr)

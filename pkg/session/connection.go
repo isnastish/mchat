@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"net"
 	"strings"
 	"sync"
@@ -21,18 +22,15 @@ const (
 var connStateTable []string
 
 type connection struct {
-	netConn     net.Conn
-	ipAddr      string
-	participant *types.Participant
-	channel     *types.Channel
-	timeout     time.Duration
-
-	// TODO: Better names.
-	idleConnChan chan struct{}
-	abortChan    chan struct{}
-	quitChan     chan struct{}
-
-	state connectionState
+	netConn                net.Conn
+	ipAddr                 string
+	participant            *types.Participant
+	channel                *types.Channel
+	timeout                time.Duration
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	abortConnectionTimeout chan struct{}
+	state                  connectionState
 }
 
 type connectionMap struct {
@@ -46,17 +44,16 @@ func initConnStateTable() {
 }
 
 func newConn(conn net.Conn, timeout time.Duration) *connection {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &connection{
-		netConn:      conn,
-		ipAddr:       conn.RemoteAddr().String(),
-		participant:  &types.Participant{},
-		channel:      &types.Channel{},
-		timeout:      timeout,
-		idleConnChan: make(chan struct{}),
-		abortChan:    make(chan struct{}),
-		quitChan:     make(chan struct{}),
-
-		state: pendingState,
+		netConn:     conn,
+		ipAddr:      conn.RemoteAddr().String(),
+		participant: &types.Participant{},
+		channel:     &types.Channel{},
+		timeout:     timeout,
+		ctx:         ctx,
+		cancel:      cancel,
+		state:       pendingState,
 	}
 }
 
@@ -71,22 +68,28 @@ func (c *connection) matchState(state connectionState) bool {
 	return c.state == state
 }
 
-// This function should be triggered only when the client was able to register or authenticate.
-// The time when a participant tries to submit all the data is not taken into account.
 func (c *connection) disconnectIfIdle() {
 	timer := time.NewTimer(c.timeout)
 	for {
 		select {
 		case <-timer.C:
-			close(c.idleConnChan)
+			// The timer has fired, close the net connection manually,
+			// and invoke the cancel() function in order to send a message to the client
+			// insie a select statement in reader::read() procedure.
 			c.netConn.Close()
+			c.cancel()
 			return
-		case <-c.abortChan:
+		case <-c.abortConnectionTimeout:
+			// A signal to abort the timeout process was received, probably due to the client being active
+			// (was able to send a message that the session received).
+			// In this case we have to stop the current timer and reset it.
 			if !timer.Stop() {
 				<-timer.C
 			}
 			timer.Reset(c.timeout)
-		case <-c.quitChan:
+		case <-c.ctx.Done():
+			// A signal to unblock this procedure was received,
+			// so we can exit gracefully without having go routine leaks.
 			return
 		}
 	}
@@ -146,13 +149,13 @@ func (cm *connectionMap) markAsConnected(connIpAddr string) {
 }
 
 // Pointers to interfaces: https://stackoverflow.com/questions/44370277/type-is-pointer-to-interface-not-interface-confusion
-func (cm *connectionMap) broadcastMessage(message interface{}) int {
+func (cm *connectionMap) broadcastMessage(msg interface{}) int {
 	var sentCount int
 
 	cm.mu.RLock()
 	defer cm.mu.Unlock()
 
-	switch msg := message.(type) {
+	switch msg := msg.(type) {
 	case *types.ChatMessage:
 		senderWasSkipped := false
 		for _, conn := range cm.connections {

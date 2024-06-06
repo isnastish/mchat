@@ -132,12 +132,12 @@ func (s *session) Run() {
 }
 
 func (s *session) sendMessage(msg interface{}) {
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case *types.SysMessage:
-		s.sysMessages <- msg.(*types.SysMessage)
+		s.sysMessages <- msg
 
 	case *types.ChatMessage:
-		s.chatMessages <- msg.(*types.ChatMessage)
+		s.chatMessages <- msg
 
 	default:
 		log.Logger.Panic("Invalid message type")

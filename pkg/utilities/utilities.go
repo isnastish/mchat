@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -35,4 +36,8 @@ func TimeNowStr() string {
 
 func Fmt(format string, args ...any) string {
 	return fmt.Sprintf(format, args...)
+}
+
+func TrimWhitespaces(src []byte) []byte {
+	return []byte(strings.Trim(string(src), " \r\n\v\t\f"))
 }
