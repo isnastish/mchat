@@ -79,7 +79,7 @@ func CreateSession(config Config) *session {
 
 	session := &session{
 		connMap:                newConnectionMap(),
-		shutdownTimer:          time.NewTimer(time.Duration(config.SessionTimeout)),
+		shutdownTimer:          time.NewTimer(time.Duration(config.SessionTimeout) * time.Second),
 		shutdownSignal:         make(chan struct{}),
 		triggerShutdownProcess: make(chan struct{}),
 		listener:               listener,
@@ -101,6 +101,8 @@ func (s *session) Run() {
 		s.shutdownSignal <- struct{}{}
 		// Causes the Accept() function to produce an error
 		// so we can shut down the session gracefully.
+		// TODO: Most likely closing the connection should be done before sending shutdownSignal,
+		// since the later will block.
 		s.listener.Close()
 	}()
 	log.Logger.Info("Listening: %s", s.listener.Addr().String())
@@ -123,7 +125,7 @@ func (s *session) Run() {
 
 		log.Logger.Info("Connected: %s", conn.RemoteAddr().String())
 
-		connection := newConn(conn, time.Duration(s.config.ParticipantTimeout))
+		connection := newConn(conn, time.Duration(s.config.ParticipantTimeout)*time.Second)
 		s.connMap.addConn(connection)
 		go s.handleConnection(connection)
 
@@ -174,9 +176,6 @@ func (s *session) handleConnection(conn *connection) {
 
 		case matchState(reader.state, selectChannelState):
 			reader.onSelectChannelState(s)
-
-		case matchState(reader.state, validateState):
-			reader.onValidateState(s)
 
 		case matchState(reader.state, acceptMessagesState):
 			reader.onAcceptMessagesState(s)

@@ -42,7 +42,9 @@ func NewRedisBackend(addr string) (*RedisBackend, error) {
 		ctx:    context.Background(),
 	}
 
-	return rb, nil
+	statusCode := client.Ping(rb.ctx)
+
+	return rb, statusCode.Err()
 }
 
 func (r *RedisBackend) doesParticipantExist(participantUsername string) bool {

@@ -48,7 +48,7 @@ func BuildSysMsg(msg string, recipients ...string) *SysMessage {
 	}
 
 	return &SysMessage{
-		Contents:  bytes.NewBuffer([]byte(util.EndOfLine(msg))),
+		Contents:  bytes.NewBuffer([]byte(msg)),
 		Recipient: recipient,
 		SentTime:  util.TimeNowStr(),
 	}

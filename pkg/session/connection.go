@@ -39,21 +39,25 @@ type connectionMap struct {
 }
 
 func initConnStateTable() {
-	connStateTable[pendingState] = "offline"
-	connStateTable[connectedState] = "online"
+	if len(connStateTable) == 0 {
+		connStateTable = make([]string, 2)
+		connStateTable[pendingState] = "offline"
+		connStateTable[connectedState] = "online"
+	}
 }
 
 func newConn(conn net.Conn, timeout time.Duration) *connection {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &connection{
-		netConn:     conn,
-		ipAddr:      conn.RemoteAddr().String(),
-		participant: &types.Participant{},
-		channel:     &types.Channel{},
-		timeout:     timeout,
-		ctx:         ctx,
-		cancel:      cancel,
-		state:       pendingState,
+		netConn:                conn,
+		ipAddr:                 conn.RemoteAddr().String(),
+		participant:            &types.Participant{},
+		channel:                &types.Channel{},
+		timeout:                timeout,
+		ctx:                    ctx,
+		cancel:                 cancel,
+		abortConnectionTimeout: make(chan struct{}),
+		state:                  pendingState,
 	}
 }
 
@@ -153,7 +157,7 @@ func (cm *connectionMap) broadcastMessage(msg interface{}) int {
 	var sentCount int
 
 	cm.mu.RLock()
-	defer cm.mu.Unlock()
+	defer cm.mu.RUnlock()
 
 	switch msg := msg.(type) {
 	case *types.ChatMessage:

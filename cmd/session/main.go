@@ -17,9 +17,9 @@ func main() {
 	var config session.Config
 
 	flag.StringVar(&config.Network, "network", "tcp", "network protocol (tcp|udp)")
-	flag.StringVar(&config.Addr, "address", ":5000", "address to listen in")
+	flag.StringVar(&config.Addr, "address", ":8080", "address to listen in")
 	flag.Int64Var(&config.SessionTimeout, "sessionTimeout", 86400 /*24h*/, "time for the session to tear down if nobody connected")
-	flag.Int64Var(&config.ParticipantTieout, "participantTimeout", 86400, "time to be elapsed (in seconds) for the participant to be manually disconnected")
+	flag.Int64Var(&config.ParticipantTimeout, "participantTimeout", 86400, "time to be elapsed (in seconds) for the participant to be manually disconnected")
 
 	flag.Parse()
 

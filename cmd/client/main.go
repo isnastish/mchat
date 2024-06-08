@@ -1,4 +1,3 @@
-// TODO: Specify port seprately from the address?
 package main
 
 import (

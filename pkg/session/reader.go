@@ -24,10 +24,12 @@ const (
 	createChannel       = 0x2
 	selectChannel       = 0x3
 	listMembers         = 0x4
-	exit                = 0x5
+	displayChatHistory  = 0x5
+	exit                = 0x6
 )
 
 var optionTable []string
+var optionsStr string
 
 const (
 	nullState readerState = 0
@@ -63,36 +65,38 @@ type readerFSM struct {
 	buffer *bytes.Buffer
 }
 
-func initOptionTable() {
-	optionTable[registerParticipant] = "register"
-	optionTable[authParticipant] = "log in"
-	optionTable[createChannel] = "create channel"
-	optionTable[selectChannel] = "select channels"
-	optionTable[listMembers] = "list members"
-	optionTable[exit] = "exit"
-}
+func initOptions() {
+	// Initialize options table and options string only once.
+	if len(optionTable) == 0 {
+		optionTable = make([]string, exit-registerParticipant+1)
 
-var optionsStr = util.Fmt(
-	"options:\n"+
-		"\t{%d}: %s\n"+
-		"\t{%d}: %s\n"+
-		"\t{%d}: %s\n"+
-		"\t{%d}: %s\n"+
-		"\t{%d}: %s\n"+
-		"\t{%d}: %s\n",
-	registerParticipant, optionTable[registerParticipant],
-	authParticipant, optionTable[authParticipant],
-	createChannel, optionTable[createChannel],
-	selectChannel, optionTable[selectChannel],
-	listMembers, optionTable[listMembers],
-	exit, optionTable[exit],
-)
+		optionTable[registerParticipant] = "register"
+		optionTable[authParticipant] = "log in"
+		optionTable[createChannel] = "create channel"
+		optionTable[selectChannel] = "select channels"
+		optionTable[listMembers] = "list members"
+		optionTable[displayChatHistory] = "display chat history"
+		optionTable[exit] = "exit"
+
+		builder := strings.Builder{}
+		builder.WriteString("options:\n")
+
+		for i := 0; i < len(optionTable); i++ {
+			builder.WriteString(util.Fmt("\t{%d}: %s\n", i+1, optionTable[i]))
+		}
+
+		builder.WriteString("\n\tenter option: ")
+
+		optionsStr = builder.String()
+	}
+}
 
 // TODO: Make it generic an accept io.Reader interface!?
 func newReader(conn *connection) *readerFSM {
-	initOptionTable()
+	initOptions()
 	return &readerFSM{
-		conn: conn,
+		conn:  conn,
+		state: joiningState,
 	}
 }
 
@@ -150,6 +154,9 @@ func (r *readerFSM) onJoiningState(chatSession *session) {
 	if err != nil {
 		chatSession.sendMessage(types.BuildSysMsg(util.Fmt("Option %s not supported", r.buffer.String()), r.conn.ipAddr))
 	}
+
+	// Since options in the UI start with an index 1
+	option -= 1
 
 	switch option {
 	case registerParticipant:
@@ -236,7 +243,8 @@ func (r *readerFSM) onRegisterParticipantState(chatSession *session) {
 		r.conn.participant.Password = r.buffer.String()
 		r.substate = null
 		r.prevState = r.state
-		r.state = validateState
+
+		r.validate(chatSession)
 	}
 }
 
@@ -278,18 +286,15 @@ func (r *readerFSM) onCreateChannelState(chatSession *session) {
 	}
 }
 
-func (r *readerFSM) onValidateState(chatSession *session) {
-	if !matchState(r.state, validateState) {
+func (r *readerFSM) validate(chatSession *session) {
+	// NOTE: How do we decide which data to validate?
+	if !matchState(r.state, registerParticipantState) &&
+		!matchState(r.state, authParticipantState) &&
+		!matchState(r.state, createChannelState) {
 		log.Logger.Panic("Invalid state")
 	}
 
-	if !matchState(r.prevState, registerParticipantState) &&
-		!matchState(r.prevState, authParticipantState) &&
-		!matchState(r.prevState, createChannelState) {
-		log.Logger.Panic("Invalid prev state")
-	}
-
-	if !matchState(r.prevState, createChannelState) {
+	if !matchState(r.state, createChannelState) {
 
 		if !validation.ValidateName(r.conn.participant.Username) {
 			chatSession.sendMessage(
@@ -305,17 +310,17 @@ func (r *readerFSM) onValidateState(chatSession *session) {
 			return
 		}
 
-		if matchState(r.prevState, registerParticipant) {
+		if matchState(r.state, registerParticipantState) {
 			// TODO: Check whether it's a valid email address by sending a message.
 			if !validation.ValidateEmail(r.conn.participant.Email) {
 				chatSession.sendMessage(
-					types.BuildSysMsg(util.Fmt("Email {%s} not valid", r.conn.participant.Email), r.conn.ipAddr),
+					types.BuildSysMsg(util.Fmt(util.EndOfLine("Email {%s} not valid"), r.conn.participant.Email), r.conn.ipAddr),
 				)
 			}
 
 			if chatSession.storage.HasParticipant(r.conn.participant.Username) {
 				chatSession.sendMessage(
-					types.BuildSysMsg(util.Fmt("Participant {%s} already exists", r.conn.participant.Username), r.conn.ipAddr),
+					types.BuildSysMsg(util.Fmt(util.EndOfLine("Participant {%s} already exists"), r.conn.participant.Username), r.conn.ipAddr),
 				)
 				r.substate = null
 				r.prevState = nullState
@@ -326,15 +331,17 @@ func (r *readerFSM) onValidateState(chatSession *session) {
 			r.conn.participant.JoinTime = util.TimeNowStr()
 
 			// TODO: Document this function in the architecture manual
-			r.conn.disconnectIfIdle()
+			go r.conn.disconnectIfIdle()
 
 			chatSession.storage.RegisterParticipant(r.conn.participant)
 
+			// Display chat history to the connected participant
+			if chatHistory := chatSession.storage.GetChatHistory(); len(chatHistory) > 0 {
+				chatSession.sendMessage(types.BuildSysMsg(buildChatHistory(chatHistory), r.conn.ipAddr))
+			}
+
 			// TODO: Document this thoroughly in the architecture manual.
 			chatSession.connMap.markAsConnected(r.conn.ipAddr)
-
-			// TODO: Display chat history
-			chatSession.storage.GetChatHistory()
 
 		} else {
 			if !chatSession.storage.AuthParticipant(r.conn.participant) {
@@ -351,7 +358,12 @@ func (r *readerFSM) onValidateState(chatSession *session) {
 			r.conn.participant.JoinTime = util.TimeNowStr()
 
 			// TODO: Document.
-			r.conn.disconnectIfIdle()
+			go r.conn.disconnectIfIdle()
+
+			// Display chat history to the connected participant
+			if chatHistory := chatSession.storage.GetChatHistory(); len(chatHistory) > 0 {
+				chatSession.sendMessage(types.BuildSysMsg(buildChatHistory(chatHistory), r.conn.ipAddr))
+			}
 
 			// TODO: Display chat history
 			chatSession.connMap.markAsConnected(r.conn.ipAddr)
@@ -420,7 +432,9 @@ func (r *readerFSM) onAcceptMessagesState(chatSession *session) {
 
 	// The session has received a message from the client, thus the timout process
 	// has to be aborted. We send a signal to the abortConnectionTimeout channel which resets.
-	close(r.conn.abortConnectionTimeout)
+	// Since the timer will be reset, we cannot close the channel, because we won't be able to reopen it,
+	// so we have to send a message instead.
+	r.conn.abortConnectionTimeout <- struct{}{}
 
 	var msg *types.ChatMessage
 

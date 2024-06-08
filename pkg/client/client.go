@@ -50,13 +50,14 @@ func (c *client) tryConnect(delay time.Duration) (net.Conn, bool) {
 	for retries := 0; ; retries++ {
 		sessionConn, err := net.Dial(c.config.Network, c.config.Addr)
 		if err == nil {
+			log.Logger.Info("Connected to %s", sessionConn.RemoteAddr().String())
 			return sessionConn, true
 		}
 		if retries >= c.config.RetriesCount {
 			return nil, false
 		}
 
-		log.Logger.Info("Attemp {%d} to connect failed, retrying in %vs", retries, delay)
+		log.Logger.Info("Attemp %d to connect failed, retrying in %v", retries, delay)
 
 		<-time.After(delay)
 	}
@@ -93,7 +94,7 @@ func (c *client) handleRemoteConnection() {
 	for {
 		tmpBuf := make([]byte, 1024)
 		bytesRead, err := c.remoteConn.Read(tmpBuf)
-		buffer := bytes.NewBuffer(util.TrimWhitespaces(tmpBuf[:bytesRead]))
+		buffer := bytes.NewBuffer(tmpBuf[:bytesRead] /*util.TrimWhitespaces(tmpBuf[:bytesRead])*/)
 
 		if err != nil && err != io.EOF {
 			log.Logger.Error("Failed to read from a remote connection %v", err)
