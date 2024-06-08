@@ -77,7 +77,46 @@ type readerFSM struct {
 	SKIP_USERDATA_PROCESSING bool
 }
 
-var FAKE_PARTICIPANTS_TABLE []string
+var _FakeParticipantTable []string
+
+func stateStr(state readerState) string {
+	// The look up table will be way more faster.
+	// Or simply storing state names inside an array.
+	switch state {
+	case nullState:
+		return "Null_State"
+
+	case joiningState:
+		return "Joining_State"
+
+	case registerParticipantState:
+		return "RegisteringParticipant_State"
+
+	case authParticipantState:
+		return "AuthenticatingParticipant_State"
+
+	case acceptMessagesState:
+		return "AcceptingMessages_State"
+
+	case createChannelState:
+		return "CreatingChannel_State"
+
+	case selectChannelState:
+		return "SelectingChannel_State"
+
+	case disconnectState:
+		return "Disonnecting_State"
+
+	case processMenuState:
+		return "ProcessingMenu_State"
+
+	case displayingChatHistoryState:
+		return "DisplayingChatHistory_State"
+
+	default:
+		return "Unknown_State"
+	}
+}
 
 func initOptions() {
 	// Initialize options table and options string only once.
@@ -114,19 +153,19 @@ func newReader(conn *connection) *readerFSM {
 		SKIP_USERDATA_PROCESSING: false,
 	}
 
-	if reader.SKIP_USERDATA_PROCESSING && len(FAKE_PARTICIPANTS_TABLE) == 0 {
-		FAKE_PARTICIPANTS_TABLE = make([]string, 0)
+	if reader.SKIP_USERDATA_PROCESSING && len(_FakeParticipantTable) == 0 {
+		_FakeParticipantTable = make([]string, 0)
 
-		FAKE_PARTICIPANTS_TABLE = append(FAKE_PARTICIPANTS_TABLE, "JohnTaylor")
-		FAKE_PARTICIPANTS_TABLE = append(FAKE_PARTICIPANTS_TABLE, "LiamMoore")
-		FAKE_PARTICIPANTS_TABLE = append(FAKE_PARTICIPANTS_TABLE, "EmmaWilliams")
-		FAKE_PARTICIPANTS_TABLE = append(FAKE_PARTICIPANTS_TABLE, "LiamWilson")
-		FAKE_PARTICIPANTS_TABLE = append(FAKE_PARTICIPANTS_TABLE, "LiamBrown")
-		FAKE_PARTICIPANTS_TABLE = append(FAKE_PARTICIPANTS_TABLE, "EmilySmith")
-		FAKE_PARTICIPANTS_TABLE = append(FAKE_PARTICIPANTS_TABLE, "AvaJones")
-		FAKE_PARTICIPANTS_TABLE = append(FAKE_PARTICIPANTS_TABLE, "MichaelMoore")
-		FAKE_PARTICIPANTS_TABLE = append(FAKE_PARTICIPANTS_TABLE, "JoeSmith")
-		FAKE_PARTICIPANTS_TABLE = append(FAKE_PARTICIPANTS_TABLE, "AvaTaylor")
+		_FakeParticipantTable = append(_FakeParticipantTable, "JohnTaylor")
+		_FakeParticipantTable = append(_FakeParticipantTable, "LiamMoore")
+		_FakeParticipantTable = append(_FakeParticipantTable, "EmmaWilliams")
+		_FakeParticipantTable = append(_FakeParticipantTable, "LiamWilson")
+		_FakeParticipantTable = append(_FakeParticipantTable, "LiamBrown")
+		_FakeParticipantTable = append(_FakeParticipantTable, "EmilySmith")
+		_FakeParticipantTable = append(_FakeParticipantTable, "AvaJones")
+		_FakeParticipantTable = append(_FakeParticipantTable, "MichaelMoore")
+		_FakeParticipantTable = append(_FakeParticipantTable, "JoeSmith")
+		_FakeParticipantTable = append(_FakeParticipantTable, "AvaTaylor")
 	}
 
 	return reader
@@ -183,7 +222,7 @@ func (r *readerFSM) read(chatSession *session) {
 
 func (r *readerFSM) onJoiningState(chatSession *session) {
 	if !matchState(r.state, joiningState) && !matchState(r.state, processMenuState) {
-		log.Logger.Panic("Invalid state")
+		log.Logger.Panic("Invalid state %s, expected states: %s, %s", stateStr(r.state), stateStr(joiningState), stateStr(processMenuState))
 	}
 
 	option, err := strconv.Atoi(r.buffer.String())
@@ -261,7 +300,7 @@ func (r *readerFSM) onJoiningState(chatSession *session) {
 
 func (r *readerFSM) onRegisterParticipantState(chatSession *session) {
 	if !matchState(r.state, registerParticipantState) {
-		log.Logger.Panic("Invalid state")
+		log.Logger.Panic("Invalid state %s, expected %s", stateStr(r.state), stateStr(registerParticipantState))
 	}
 
 	switch {
@@ -283,7 +322,7 @@ func (r *readerFSM) onRegisterParticipantState(chatSession *session) {
 
 func (r *readerFSM) onAuthParticipantState(chatSession *session) {
 	if !matchState(r.state, authParticipantState) {
-		log.Logger.Panic("Invalid state")
+		log.Logger.Panic("Invalid state %s, expected %s", stateStr(r.state), stateStr(authParticipantState))
 	}
 
 	switch {
@@ -300,7 +339,7 @@ func (r *readerFSM) onAuthParticipantState(chatSession *session) {
 
 func (r *readerFSM) onCreateChannelState(chatSession *session) {
 	if !matchState(r.state, createChannelState) {
-		log.Logger.Panic("Invalid state")
+		log.Logger.Panic("Invalid state %s, expected %s", stateStr(r.state), stateStr(createChannelState))
 	}
 
 	switch {
@@ -316,11 +355,10 @@ func (r *readerFSM) onCreateChannelState(chatSession *session) {
 }
 
 func (r *readerFSM) validate(chatSession *session) {
-	// NOTE: How do we decide which data to validate?
 	if !matchState(r.state, registerParticipantState) &&
 		!matchState(r.state, authParticipantState) &&
 		!matchState(r.state, createChannelState) {
-		log.Logger.Panic("Invalid state")
+		log.Logger.Panic("Invalid state %s, expected states %s, %s, %s", stateStr(r.state), stateStr(registerParticipantState), stateStr(authParticipantState), stateStr(createChannelState))
 	}
 
 	if !matchState(r.state, createChannelState) {
@@ -429,7 +467,7 @@ func (r *readerFSM) updateState(newState readerState, newSubstate readerSubstate
 
 func (r *readerFSM) onSelectChannelState(chatSession *session) {
 	if !matchState(r.state, selectChannelState) {
-		log.Logger.Panic("Invalid state")
+		log.Logger.Panic("Invalid %s state, expected %s", stateStr(r.state), stateStr(selectChannelState))
 	}
 
 	// TODO: Give a participant three attempts to select a channel,
@@ -470,7 +508,7 @@ func (r *readerFSM) onSelectChannelState(chatSession *session) {
 
 func (r *readerFSM) onAcceptMessagesState(chatSession *session) {
 	if !matchState(r.state, acceptMessagesState) {
-		log.Logger.Panic("Invalid state")
+		log.Logger.Panic("Invalid %s state, expected %s", stateStr(r.state), stateStr(acceptMessagesState))
 	}
 
 	// The session has received a message from the client, thus the timout process
@@ -481,9 +519,8 @@ func (r *readerFSM) onAcceptMessagesState(chatSession *session) {
 
 	var msg *types.ChatMessage
 	if r.SKIP_USERDATA_PROCESSING {
-		// NOTE: We won't be able to display participant's history here.
-		index := rand.Intn(len(FAKE_PARTICIPANTS_TABLE) - 1)
-		msg = types.BuildChatMsg(r.buffer.Bytes(), FAKE_PARTICIPANTS_TABLE[index], r.conn.channel.Name)
+		index := rand.Intn(len(_FakeParticipantTable) - 1)
+		msg = types.BuildChatMsg(r.buffer.Bytes(), _FakeParticipantTable[index], r.conn.channel.Name)
 
 	} else {
 		// If the channel is an empty string, it won't pass the check inside the backend itself.
@@ -499,17 +536,17 @@ func (r *readerFSM) onAcceptMessagesState(chatSession *session) {
 
 func (r *readerFSM) onDisplayChatHistoryState(chatSession *session) {
 	if !matchState(r.state, displayingChatHistoryState) {
-		log.Logger.Info("Invalid state, displayChatHistoryState is expected")
+		log.Logger.Info("Invalid %s state, expected %s", stateStr(r.state), stateStr(registerParticipantState))
 	}
 
-	if history := chatSession.storage.GetChannelHistory(r.conn.channel.Name); len(history) > 0 {
+	if history := chatSession.storage.GetChatHistory(); len(history) > 0 {
 		chatSession.sendMessage(types.BuildSysMsg(buildChatHistory(history), r.conn.ipAddr))
 	}
 }
 
 func (r *readerFSM) onDisconnectState(chatSession *session) {
 	if !matchState(r.state, disconnectState) {
-		log.Logger.Panic("Invalid state")
+		log.Logger.Panic("Invalid %s state, expected %s", stateStr(r.state), stateStr(disconnectState))
 	}
 
 	if r.conn.participant.Username != "" {
