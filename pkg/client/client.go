@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/isnastish/chat/pkg/logger"
@@ -79,7 +80,11 @@ func (c *client) Run() {
 	for {
 		select {
 		case msg := <-c.incomingMessages:
-			fmt.Printf("%s", msg.Contents.String())
+			if strings.Contains(msg.Contents.String(), ":accepted") {
+				util.ClearScreen()
+			} else {
+				fmt.Printf("%s", msg.Contents.String())
+			}
 
 		case msg := <-c.outgoingMessages:
 			util.WriteBytes(c.remoteConn, msg.Contents)

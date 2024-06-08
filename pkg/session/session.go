@@ -149,35 +149,47 @@ func (s *session) sendMessage(msg interface{}) {
 func (s *session) handleConnection(conn *connection) {
 	reader := newReader(conn)
 
+	// Display chat history when participant has connected
+	if reader.SKIP_USERDATA_PROCESSING {
+		reader.onDisplayChatHistoryState(s)
+	}
+
 	for {
-		if matchState(reader.state, joiningState) || matchState(reader.state, processMenuState) {
-			if !matchState(reader.prevState, joiningState) {
-				s.sendMessage(types.BuildSysMsg(optionsStr, reader.conn.ipAddr))
+		if !reader.SKIP_USERDATA_PROCESSING {
+			if matchState(reader.state, joiningState) || matchState(reader.state, processMenuState) {
+				if !matchState(reader.prevState, joiningState) {
+					s.sendMessage(types.BuildSysMsg(optionsStr, reader.conn.ipAddr))
+				}
 			}
 		}
 
 		reader.read(s)
 
-		switch {
-		case matchState(reader.state, joiningState):
-			reader.onJoiningState(s)
+		if !reader.SKIP_USERDATA_PROCESSING {
+			switch {
+			case matchState(reader.state, joiningState):
+				reader.onJoiningState(s)
 
-		case matchState(reader.state, processMenuState):
-			reader.onJoiningState(s)
+			case matchState(reader.state, processMenuState):
+				reader.onJoiningState(s)
 
-		case matchState(reader.state, registerParticipantState):
-			reader.onRegisterParticipantState(s)
+			case matchState(reader.state, registerParticipantState):
+				reader.onRegisterParticipantState(s)
 
-		case matchState(reader.state, authParticipantState):
-			reader.onAuthParticipantState(s)
+			case matchState(reader.state, authParticipantState):
+				reader.onAuthParticipantState(s)
 
-		case matchState(reader.state, createChannelState):
-			reader.onCreateChannelState(s)
+			case matchState(reader.state, createChannelState):
+				reader.onCreateChannelState(s)
 
-		case matchState(reader.state, selectChannelState):
-			reader.onSelectChannelState(s)
+			case matchState(reader.state, selectChannelState):
+				reader.onSelectChannelState(s)
 
-		case matchState(reader.state, acceptMessagesState):
+			case matchState(reader.state, acceptMessagesState):
+				reader.onAcceptMessagesState(s)
+			}
+		} else {
+			reader.state = acceptMessagesState
 			reader.onAcceptMessagesState(s)
 		}
 

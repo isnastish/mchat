@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -14,7 +16,7 @@ func Sha256Checksum(bytes []byte) string {
 	return fmt.Sprintf("%X", sum)
 }
 
-func EndOfLine(src string) string {
+func endOfLine(src string) string {
 	return src + "\r\n"
 }
 
@@ -38,6 +40,22 @@ func Fmt(format string, args ...any) string {
 	return fmt.Sprintf(format, args...)
 }
 
+func Fmtln(format string, args ...any) string {
+	return fmt.Sprintf(endOfLine(format), args...)
+}
+
 func TrimWhitespaces(src []byte) []byte {
 	return []byte(strings.Trim(string(src), " \r\n\v\t\f"))
+}
+
+func ClearScreen() {
+	// TODO: Once the user entered all the data, the screen has to be cleared on its side.
+	// So we have enough space for dispalying messages.
+	cmd := exec.Command("clear")
+	cmd.Stdout = os.Stdout
+	cmd.Run()
+}
+
+func Sleep(duration int64) {
+	<-time.After(time.Duration(duration) * time.Millisecond)
 }
