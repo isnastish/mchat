@@ -149,51 +149,48 @@ func (s *session) sendMessage(msg interface{}) {
 func (s *session) handleConnection(conn *connection) {
 	reader := newReader(conn)
 
-	// Display chat history when participant has connected
-	if reader.SKIP_USERDATA_PROCESSING {
-		reader.onDisplayChatHistoryState(s)
+	if reader._DEBUG_SkipUsedataProcessing {
+		reader.displayChatHistory(s)
 	}
 
 	for {
-		if !reader.SKIP_USERDATA_PROCESSING {
-			if matchState(reader.state, joiningState) || matchState(reader.state, processMenuState) {
-				if !matchState(reader.prevState, joiningState) {
-					s.sendMessage(types.BuildSysMsg(optionsStr, reader.conn.ipAddr))
-				}
+		if !reader._DEBUG_SkipUsedataProcessing {
+			if matchState(reader.state, stateJoining) || matchState(reader.state, stateProcessingMenu) {
+				s.sendMessage(types.BuildSysMsg(optionsStr, reader.conn.ipAddr))
 			}
 		}
 
 		reader.read(s)
 
-		if !reader.SKIP_USERDATA_PROCESSING {
+		if !reader._DEBUG_SkipUsedataProcessing {
 			switch {
-			case matchState(reader.state, joiningState):
+			case matchState(reader.state, stateJoining):
 				reader.onJoiningState(s)
 
-			case matchState(reader.state, processMenuState):
+			case matchState(reader.state, stateProcessingMenu):
 				reader.onJoiningState(s)
 
-			case matchState(reader.state, registerParticipantState):
+			case matchState(reader.state, stateRegistration):
 				reader.onRegisterParticipantState(s)
 
-			case matchState(reader.state, authParticipantState):
+			case matchState(reader.state, stateAuthentication):
 				reader.onAuthParticipantState(s)
 
-			case matchState(reader.state, createChannelState):
+			case matchState(reader.state, stateCreatingChannel):
 				reader.onCreateChannelState(s)
 
-			case matchState(reader.state, selectChannelState):
+			case matchState(reader.state, stateSelectingChannel):
 				reader.onSelectChannelState(s)
 
-			case matchState(reader.state, acceptMessagesState):
+			case matchState(reader.state, stateAcceptingMessages):
 				reader.onAcceptMessagesState(s)
 			}
 		} else {
-			reader.state = acceptMessagesState
+			reader.updateState(stateAcceptingMessages)
 			reader.onAcceptMessagesState(s)
 		}
 
-		if matchState(reader.state, disconnectState) {
+		if matchState(reader.state, stateDisconnecting) {
 			reader.onDisconnectState(s)
 			break
 		}
@@ -208,12 +205,12 @@ func (s *session) processMessages() {
 	for {
 		select {
 		case msg := <-s.chatMessages:
-			log.Logger.Info("Broadcasting participant message")
+			// log.Logger.Info("Broadcasting participant message")
 			broadcasted := s.connMap.broadcastMessage(msg)
 			s.metrics.broadcastedChatMessages += broadcasted
 
 		case msg := <-s.sysMessages:
-			log.Logger.Info("Broadcasting system message")
+			// log.Logger.Info("Broadcasting system message")
 			sent := s.connMap.broadcastMessage(msg)
 			s.metrics.sentSysMessages = sent
 

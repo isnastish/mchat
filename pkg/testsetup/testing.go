@@ -1,3 +1,4 @@
+// TODO: Use init() function to setup testing data.
 package testsetup
 
 import (

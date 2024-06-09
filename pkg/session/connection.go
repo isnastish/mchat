@@ -38,12 +38,10 @@ type connectionMap struct {
 	mu          sync.RWMutex
 }
 
-func initConnStateTable() {
-	if len(connStateTable) == 0 {
-		connStateTable = make([]string, 2)
-		connStateTable[pendingState] = "offline"
-		connStateTable[connectedState] = "online"
-	}
+func init() {
+	connStateTable = make([]string, 2)
+	connStateTable[pendingState] = "offline"
+	connStateTable[connectedState] = "online"
 }
 
 func newConn(conn net.Conn, timeout time.Duration) *connection {
@@ -62,7 +60,6 @@ func newConn(conn net.Conn, timeout time.Duration) *connection {
 }
 
 func newConnectionMap() *connectionMap {
-	initConnStateTable()
 	return &connectionMap{
 		connections: make(map[string]*connection),
 	}

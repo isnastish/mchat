@@ -18,157 +18,70 @@ import (
 
 type readerState int8
 type readerSubstate int8
+type option int8
 
-// TODO: We have a lot of duplications with options and the state of the reader.
-// We would have to pull them out into a single thing if possible.
 const (
-	registerParticipant = 0
-	authParticipant     = 0x1
-	createChannel       = 0x2
-	selectChannel       = 0x3
-	listMembers         = 0x4
-	displayChatHistory  = 0x5
-	exit                = 0x6
-)
-
-var optionTable []string
-var optionsStr string
-
-// TODO: Create a states table for logging, so we can display what is the current
-// state and what state is expected if invalid one was discovered.
-const (
-	nullState readerState = 0
-
-	joiningState             readerState = 0x1
-	registerParticipantState readerState = 0x2
-	authParticipantState     readerState = 0x3
-	acceptMessagesState      readerState = 0x4
-	createChannelState       readerState = 0x5
-	selectChannelState       readerState = 0x6
-	disconnectState          readerState = 0x7
-	processMenuState         readerState = 0x8
-
-	// Experimental states
-	displayingChatHistoryState readerState = 0x9
+	opRegister      option = 0
+	opAuthenticate  option = 0x1
+	opCreateChannel option = 0x2
+	opSelectChannel option = 0x3
+	opListMembers   option = 0x4
+	opDisplayChat   option = 0x5
+	opExit          option = 0x6
 )
 
 const (
-	null readerSubstate = 0
+	stateNull readerState = 0
 
-	readName      readerSubstate = 0x1
-	readPassword  readerSubstate = 0x2
-	readEmail     readerSubstate = 0x3
-	readDesc      readerSubstate = 0x4
-	readChanIndex readerSubstate = 0x5
+	stateJoining           readerState = 0x1
+	stateRegistration      readerState = 0x2
+	stateAuthentication    readerState = 0x3
+	stateAcceptingMessages readerState = 0x4
+	stateCreatingChannel   readerState = 0x5
+	stateSelectingChannel  readerState = 0x6
+	stateProcessingMenu    readerState = 0x7
+	stateDisconnecting     readerState = 0x8
+)
+
+const (
+	substateNull readerSubstate = 0
+
+	substateReadingName         readerSubstate = 0x1
+	substateReadingPassword     readerSubstate = 0x2
+	substateReadingEmailAddress readerSubstate = 0x3
+	substateReadingChannnelDesc readerSubstate = 0x4
+	// substate_Reading        readerSubstate = 0x5
 )
 
 type readerFSM struct {
 	conn *connection
 
-	prevState readerState
-	state     readerState
-	substate  readerSubstate
+	state    readerState
+	substate readerSubstate
 
 	buffer *bytes.Buffer
 
 	// Set to true if in development mode.
 	// This allows to disable paticipant's data submission process
 	// and jump straight to exchaning the messages.
-	SKIP_USERDATA_PROCESSING bool
+	_DEBUG_SkipUsedataProcessing bool
 }
 
-var _FakeParticipantTable []string
+var optionsStr string
+var optionTable []string
+var stateTable []string
 
-func stateStr(state readerState) string {
-	// The look up table will be way more faster.
-	// Or simply storing state names inside an array.
-	switch state {
-	case nullState:
-		return "Null_State"
-
-	case joiningState:
-		return "Joining_State"
-
-	case registerParticipantState:
-		return "RegisteringParticipant_State"
-
-	case authParticipantState:
-		return "AuthenticatingParticipant_State"
-
-	case acceptMessagesState:
-		return "AcceptingMessages_State"
-
-	case createChannelState:
-		return "CreatingChannel_State"
-
-	case selectChannelState:
-		return "SelectingChannel_State"
-
-	case disconnectState:
-		return "Disonnecting_State"
-
-	case processMenuState:
-		return "ProcessingMenu_State"
-
-	case displayingChatHistoryState:
-		return "DisplayingChatHistory_State"
-
-	default:
-		return "Unknown_State"
-	}
-}
-
-func initOptions() {
-	// Initialize options table and options string only once.
-	if len(optionTable) == 0 {
-		optionTable = make([]string, exit-registerParticipant+1)
-
-		optionTable[registerParticipant] = "register"
-		optionTable[authParticipant] = "log in"
-		optionTable[createChannel] = "create channel"
-		optionTable[selectChannel] = "select channels"
-		optionTable[listMembers] = "list members"
-		optionTable[displayChatHistory] = "display chat history"
-		optionTable[exit] = "exit"
-
-		builder := strings.Builder{}
-		builder.WriteString("options:\n")
-
-		for i := 0; i < len(optionTable); i++ {
-			builder.WriteString(util.Fmt("\t{%d}: %s\n", i+1, optionTable[i]))
-		}
-
-		builder.WriteString("\n\tenter option: ")
-
-		optionsStr = builder.String()
-	}
-}
-
-// TODO: Make it generic an accept io.Reader interface!?
-func newReader(conn *connection) *readerFSM {
-	initOptions()
-	reader := &readerFSM{
-		conn:                     conn,
-		state:                    joiningState,
-		SKIP_USERDATA_PROCESSING: false,
-	}
-
-	if reader.SKIP_USERDATA_PROCESSING && len(_FakeParticipantTable) == 0 {
-		_FakeParticipantTable = make([]string, 0)
-
-		_FakeParticipantTable = append(_FakeParticipantTable, "JohnTaylor")
-		_FakeParticipantTable = append(_FakeParticipantTable, "LiamMoore")
-		_FakeParticipantTable = append(_FakeParticipantTable, "EmmaWilliams")
-		_FakeParticipantTable = append(_FakeParticipantTable, "LiamWilson")
-		_FakeParticipantTable = append(_FakeParticipantTable, "LiamBrown")
-		_FakeParticipantTable = append(_FakeParticipantTable, "EmilySmith")
-		_FakeParticipantTable = append(_FakeParticipantTable, "AvaJones")
-		_FakeParticipantTable = append(_FakeParticipantTable, "MichaelMoore")
-		_FakeParticipantTable = append(_FakeParticipantTable, "JoeSmith")
-		_FakeParticipantTable = append(_FakeParticipantTable, "AvaTaylor")
-	}
-
-	return reader
+var _DEBUG_FakeParticipantTable = [10]string{
+	"JohnTaylor",
+	"LiamMoore",
+	"EmmaWilliams",
+	"LiamWilson",
+	"LiamBrown",
+	"EmilySmith",
+	"AvaJones",
+	"MichaelMoore",
+	"JoeSmith",
+	"AvaTaylor",
 }
 
 func matchState(stateA, stateB readerState) bool {
@@ -177,6 +90,52 @@ func matchState(stateA, stateB readerState) bool {
 
 func matchSubstate(substateA, substateB readerSubstate) bool {
 	return substateA == substateB
+}
+
+func init() {
+	// states table
+	stateTable = make([]string, stateDisconnecting-stateNull+1)
+	stateTable[stateNull] = "StateNull"
+	stateTable[stateJoining] = "StateJoining"
+	stateTable[stateRegistration] = "StateRegistration"
+	stateTable[stateAuthentication] = "StateAuthentication"
+	stateTable[stateAcceptingMessages] = "StateAcceptingMessages"
+	stateTable[stateAcceptingMessages] = "StateAcceptingMessages"
+	stateTable[stateCreatingChannel] = "StateCreatingChannel"
+	stateTable[stateSelectingChannel] = "StateSelectingChannel"
+	stateTable[stateProcessingMenu] = "StateProcessingMenu"
+	stateTable[stateDisconnecting] = "StateDisconnecting"
+
+	// options table
+	optionTable = make([]string, opExit-opRegister+1)
+	optionTable[opRegister] = "register"
+	optionTable[opAuthenticate] = "log in"
+	optionTable[opCreateChannel] = "create channel"
+	optionTable[opSelectChannel] = "select channels"
+	optionTable[opListMembers] = "list members"
+	optionTable[opDisplayChat] = "display chat history"
+	optionTable[opExit] = "exit"
+
+	// Build options string so it can be used as a body of a message
+	builder := strings.Builder{}
+	builder.WriteString("options:\n")
+
+	for i := 0; i < len(optionTable); i++ {
+		builder.WriteString(util.Fmt("\t{%d}: %s\n", i+1, optionTable[i]))
+	}
+
+	builder.WriteString("\n\tenter option: ")
+	optionsStr = builder.String()
+}
+
+// TODO: Make it generic an accept io.Reader interface!?
+func newReader(conn *connection) *readerFSM {
+	return &readerFSM{
+		conn:                         conn,
+		substate:                     substateNull,
+		state:                        stateJoining,
+		_DEBUG_SkipUsedataProcessing: false,
+	}
 }
 
 func (r *readerFSM) read(chatSession *session) {
@@ -208,165 +167,160 @@ func (r *readerFSM) read(chatSession *session) {
 			// Thus, the next read() never going to happen.
 			r.conn.cancel()
 		}
-
-		r.state = disconnectState
+		r.updateState(stateDisconnecting)
 		return
 	}
 
 	// This conditions occurs when an opposite side closed the connection itself.
 	// net.Conn.Close() was called.
 	if bytesRead == 0 {
-		r.state = disconnectState
+		r.updateState(stateDisconnecting)
 	}
 }
 
 func (r *readerFSM) onJoiningState(chatSession *session) {
-	if !matchState(r.state, joiningState) && !matchState(r.state, processMenuState) {
-		log.Logger.Panic("Invalid state %s, expected states: %s, %s", stateStr(r.state), stateStr(joiningState), stateStr(processMenuState))
+	if !matchState(r.state, stateJoining) && !matchState(r.state, stateProcessingMenu) {
+		log.Logger.Panic(
+			"Invalid state %s, expected states: %s, %s",
+			stateTable[r.state], stateTable[stateJoining], stateTable[stateProcessingMenu])
 	}
 
-	option, err := strconv.Atoi(r.buffer.String())
+	op, err := strconv.Atoi(r.buffer.String())
 	if err != nil {
 		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Option %s not supported", r.buffer.String()), r.conn.ipAddr))
 	}
 
 	// Since options in the UI start with an index 1
-	option -= 1
+	op -= 1
 
-	switch option {
-	case registerParticipant:
-		if matchState(r.state, joiningState) {
+	switch option(op) {
+	case opRegister:
+		if matchState(r.state, stateJoining) {
 			chatSession.sendMessage(types.BuildSysMsg("Username: ", r.conn.ipAddr))
-			r.prevState = joiningState
-			r.substate = readName
-			r.state = registerParticipantState
-			return
+			r.updateState(stateRegistration, substateReadingName)
+		} else {
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Already registered"), r.conn.ipAddr))
 		}
-		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Already registered"), r.conn.ipAddr))
 
-	case authParticipant:
-		if matchState(r.state, joiningState) {
+	case opAuthenticate:
+		if matchState(r.state, stateJoining) {
 			chatSession.sendMessage(types.BuildSysMsg("Username: ", r.conn.ipAddr))
-			r.prevState = joiningState
-			r.substate = readName
-			r.state = authParticipantState
-			return
+			r.updateState(stateAuthentication, substateReadingName)
+		} else {
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Already authenticated"), r.conn.ipAddr))
 		}
-		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Already authenticated"), r.conn.ipAddr))
 
-	case createChannel:
-		if !matchState(r.state, joiningState) {
+	case opCreateChannel:
+		if !matchState(r.state, stateJoining) {
 			chatSession.sendMessage(types.BuildSysMsg("Channel name: ", r.conn.ipAddr))
-			r.prevState = joiningState
-			r.substate = readName
-			r.state = createChannelState
-			return
+			r.updateState(stateCreatingChannel, substateReadingName)
+		} else {
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Authentication required"), r.conn.ipAddr))
 		}
-		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Authentication required"), r.conn.ipAddr))
 
-	case selectChannel:
-		if !matchState(r.state, joiningState) {
-			if channels := chatSession.storage.GetChannels(); len(channels) > 0 {
-				chatSession.sendMessage(types.BuildSysMsg(util.Fmtln(buildChannelList(channels)), r.conn.ipAddr))
-				chatSession.sendMessage(types.BuildSysMsg("Channel's index: ", r.conn.ipAddr))
-				r.prevState = joiningState
-				r.state = selectChannelState
-			} else {
-				chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("No channels were created"), r.conn.ipAddr))
+	case opSelectChannel:
+		// If a participant is already connected and channle's list is not empty,
+		// we set the state to be stateSlectingChannel and request to enter channel's id from the user
+		if r.conn.matchState(connectedState) {
+			if r.displayChannels(chatSession) {
+				chatSession.sendMessage(types.BuildSysMsg("channel id: ", r.conn.ipAddr))
+				r.updateState(stateSelectingChannel)
 			}
-			return
+		} else {
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Authentication required"), r.conn.ipAddr))
 		}
-		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Authentication required"), r.conn.ipAddr))
 
-	case listMembers:
-		if !matchState(r.state, joiningState) {
-			if members := chatSession.storage.GetParticipants(); len(members) > 0 {
-				chatSession.sendMessage(types.BuildSysMsg(util.Fmtln(buildMembersList(chatSession, members)), r.conn.ipAddr))
-			}
-			r.prevState = r.state
-			r.state = acceptMessagesState
-			return
+	case opListMembers:
+		if r.conn.matchState(connectedState) {
+			r.displayMembers(chatSession)
+			r.updateState(stateAcceptingMessages)
+		} else {
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Authentication required"), r.conn.ipAddr))
 		}
-		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Authentication required"), r.conn.ipAddr))
 
-	case exit:
-		r.state = disconnectState
+	case opExit:
+		r.updateState(stateDisconnecting)
 
 	default:
-		// Not setting the prevState so that then menu can be displayed.
-		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Invalid option"), r.conn.ipAddr))
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Invalid option %s", r.buffer.String()), r.conn.ipAddr))
 	}
 }
 
 func (r *readerFSM) onRegisterParticipantState(chatSession *session) {
-	if !matchState(r.state, registerParticipantState) {
-		log.Logger.Panic("Invalid state %s, expected %s", stateStr(r.state), stateStr(registerParticipantState))
+	if !matchState(r.state, stateRegistration) {
+		log.Logger.Panic(
+			"Invalid state %s, expected %s",
+			stateTable[r.state], stateTable[stateRegistration])
 	}
 
-	switch {
-	case matchSubstate(r.substate, readName):
+	switch r.substate {
+	case substateReadingName:
 		r.conn.participant.Username = r.buffer.String()
-		r.substate = readEmail
 		chatSession.sendMessage(types.BuildSysMsg("Email: ", r.conn.ipAddr))
+		r.updateState(r.state, substateReadingEmailAddress)
 
-	case matchSubstate(r.substate, readEmail):
+	case substateReadingEmailAddress:
 		r.conn.participant.Email = r.buffer.String()
-		r.substate = readPassword
 		chatSession.sendMessage(types.BuildSysMsg("Password: ", r.conn.ipAddr))
+		r.updateState(r.state, substateReadingPassword)
 
-	case matchSubstate(r.substate, readPassword):
+	case substateReadingPassword:
 		r.conn.participant.Password = r.buffer.String()
 		r.validate(chatSession)
 	}
 }
 
 func (r *readerFSM) onAuthParticipantState(chatSession *session) {
-	if !matchState(r.state, authParticipantState) {
-		log.Logger.Panic("Invalid state %s, expected %s", stateStr(r.state), stateStr(authParticipantState))
+	if !matchState(r.state, stateAuthentication) {
+		log.Logger.Panic("Invalid state %s, expected %s", stateTable[r.state], stateTable[stateAuthentication])
 	}
 
-	switch {
-	case matchSubstate(r.substate, readName):
+	switch r.substate {
+	case substateReadingName:
 		r.conn.participant.Username = r.buffer.String()
-		r.substate = readPassword
 		chatSession.sendMessage(types.BuildSysMsg("Password: ", r.conn.ipAddr))
+		r.updateState(r.state, substateReadingName)
 
-	case matchSubstate(r.substate, readPassword):
+	case substateReadingPassword:
 		r.conn.participant.Password = r.buffer.String()
 		r.validate(chatSession)
 	}
 }
 
 func (r *readerFSM) onCreateChannelState(chatSession *session) {
-	if !matchState(r.state, createChannelState) {
-		log.Logger.Panic("Invalid state %s, expected %s", stateStr(r.state), stateStr(createChannelState))
+	if !matchState(r.state, stateCreatingChannel) {
+		log.Logger.Panic("Invalid state %s, expected %s", stateTable[r.state], stateTable[stateCreatingChannel])
 	}
 
-	switch {
-	case matchSubstate(r.substate, readName):
+	switch r.substate {
+	case substateReadingName:
 		r.conn.channel.Name = r.buffer.String()
-		r.substate = readDesc
 		chatSession.sendMessage(types.BuildSysMsg("Description: ", r.conn.ipAddr))
+		r.updateState(r.state, substateReadingChannnelDesc)
 
-	case matchSubstate(r.substate, readDesc):
+	case substateReadingChannnelDesc:
+		// TODO: It doesn't really make sense to process channel's description and do the validation of channel's name only after, but let be for now.
 		r.conn.channel.Desc = r.buffer.String()
 		r.validate(chatSession)
 	}
 }
 
 func (r *readerFSM) validate(chatSession *session) {
-	if !matchState(r.state, registerParticipantState) &&
-		!matchState(r.state, authParticipantState) &&
-		!matchState(r.state, createChannelState) {
-		log.Logger.Panic("Invalid state %s, expected states %s, %s, %s", stateStr(r.state), stateStr(registerParticipantState), stateStr(authParticipantState), stateStr(createChannelState))
+	if !matchState(r.state, stateRegistration) &&
+		!matchState(r.state, stateAuthentication) &&
+		!matchState(r.state, stateCreatingChannel) {
+		log.Logger.Panic(
+			"Invalid state %s, expected states %s, %s, %s",
+			stateTable[r.state], stateTable[stateRegistration], stateTable[stateAuthentication], stateTable[stateCreatingChannel])
 	}
 
-	if !matchState(r.state, createChannelState) {
+	if !matchState(r.state, stateCreatingChannel) {
 
 		if !validation.ValidateName(r.conn.participant.Username) {
 			chatSession.sendMessage(
-				types.BuildSysMsg(util.Fmtln("Username {%s} not valid", r.conn.participant.Username), r.conn.ipAddr),
+				types.BuildSysMsg(util.Fmtln("Username %s not valid", r.conn.participant.Username), r.conn.ipAddr),
 			)
+			r.updateState(stateJoining)
 			return
 		}
 
@@ -374,24 +328,25 @@ func (r *readerFSM) validate(chatSession *session) {
 			chatSession.sendMessage(
 				types.BuildSysMsg(util.Fmtln("Password {%s} not valid", r.conn.participant.Password), r.conn.ipAddr),
 			)
+			r.updateState(stateJoining)
 			return
 		}
 
-		if matchState(r.state, registerParticipantState) {
+		if matchState(r.state, stateRegistration) {
 			// TODO: Check whether it's a valid email address by sending a message.
 			if !validation.ValidateEmail(r.conn.participant.Email) {
 				chatSession.sendMessage(
 					types.BuildSysMsg(util.Fmtln("Email {%s} not valid", r.conn.participant.Email), r.conn.ipAddr),
 				)
+				r.updateState(stateJoining)
+				return
 			}
 
 			if chatSession.storage.HasParticipant(r.conn.participant.Username) {
 				chatSession.sendMessage(
-					types.BuildSysMsg(util.Fmtln("Participant {%s} already exists", r.conn.participant.Username), r.conn.ipAddr),
+					types.BuildSysMsg(util.Fmtln("Participant %s already exists", r.conn.participant.Username), r.conn.ipAddr),
 				)
-				r.substate = null
-				r.prevState = nullState
-				r.state = joiningState
+				r.updateState(stateJoining)
 				return
 			}
 
@@ -404,9 +359,7 @@ func (r *readerFSM) validate(chatSession *session) {
 			chatSession.storage.RegisterParticipant(r.conn.participant)
 
 			// Display chat history to the connected participant
-			if chatHistory := chatSession.storage.GetChatHistory(); len(chatHistory) > 0 {
-				chatSession.sendMessage(types.BuildSysMsg(util.Fmtln(buildChatHistory(chatHistory)), r.conn.ipAddr))
-			}
+			r.displayChatHistory(chatSession)
 
 			// TODO: Document this thoroughly in the architecture manual
 			chatSession.connMap.markAsConnected(r.conn.ipAddr)
@@ -414,12 +367,10 @@ func (r *readerFSM) validate(chatSession *session) {
 		} else {
 			if !chatSession.storage.AuthParticipant(r.conn.participant) {
 				chatSession.sendMessage(
-					types.BuildSysMsg(util.Fmtln("Failed to authenticate participant {%s}. "+
+					types.BuildSysMsg(util.Fmtln("Failed to authenticate participant %s. "+
 						"Username or password is incorrect.", r.conn.participant.Username), r.conn.ipAddr),
 				)
-				r.substate = null
-				r.prevState = nullState
-				r.state = joiningState
+				r.updateState(stateJoining)
 				return
 			}
 
@@ -429,9 +380,7 @@ func (r *readerFSM) validate(chatSession *session) {
 			go r.conn.disconnectIfIdle()
 
 			// Display chat history to the connected participant
-			if chatHistory := chatSession.storage.GetChatHistory(); len(chatHistory) > 0 {
-				chatSession.sendMessage(types.BuildSysMsg(util.Fmtln(buildChatHistory(chatHistory)), r.conn.ipAddr))
-			}
+			r.displayChatHistory(chatSession)
 
 			// TODO: Display chat history
 			chatSession.connMap.markAsConnected(r.conn.ipAddr)
@@ -443,6 +392,7 @@ func (r *readerFSM) validate(chatSession *session) {
 			chatSession.sendMessage(
 				types.BuildSysMsg(util.Fmtln("Channel name {%s} is invalid", r.conn.channel.Name), r.conn.ipAddr),
 			)
+			r.updateState(stateProcessingMenu)
 			return
 		}
 
@@ -450,65 +400,51 @@ func (r *readerFSM) validate(chatSession *session) {
 			chatSession.sendMessage(
 				types.BuildSysMsg(util.Fmtln("Channel {%s} already exist", r.conn.channel.Name), r.conn.ipAddr),
 			)
+			r.updateState(stateProcessingMenu)
 			return
 		}
 
 		chatSession.storage.RegisterChannel(r.conn.channel)
 	}
 
-	r.updateState(acceptMessagesState, null)
-}
-
-func (r *readerFSM) updateState(newState readerState, newSubstate readerSubstate) {
-	r.substate = newSubstate
-	r.prevState = r.state
-	r.state = newState
+	// Set the state to accepting messages if either registration/authentication/channel creation went successfully
+	r.updateState(stateAcceptingMessages)
 }
 
 func (r *readerFSM) onSelectChannelState(chatSession *session) {
-	if !matchState(r.state, selectChannelState) {
-		log.Logger.Panic("Invalid %s state, expected %s", stateStr(r.state), stateStr(selectChannelState))
+	if !matchState(r.state, stateSelectingChannel) {
+		log.Logger.Panic("Invalid %s state, expected %s", stateTable[r.state], stateTable[stateSelectingChannel])
 	}
 
-	// TODO: Give a participant three attempts to select a channel,
-	// if he fails all of them, get back to displaying the menu. (Probably)
-	channelID, err := strconv.Atoi(r.buffer.String())
+	id, err := strconv.Atoi(r.buffer.String())
 	if err != nil {
-		chatSession.sendMessage(types.BuildSysMsg("Index {%s} is invalid", r.conn.ipAddr))
-		r.substate = null
-		r.state = processMenuState
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Invalid channel id %s", r.buffer.String()), r.conn.ipAddr))
+		r.updateState(stateProcessingMenu)
 		return
 	}
 
 	channels := chatSession.storage.GetChannels()
-	if channelID > 0 && channelID < len(channels) {
+	if id > 0 && id < len(channels) {
 		// Fine as long as nobody uses the information about the channel rather than the reader itself.
 		// If we, for example, relied on channel's name in broadcastMessages procedure,
-		// the next line would cause race-conditions.
-		r.conn.channel = channels[channelID]
-
+		// the next line would cause race-conditions since we modifying the connection's internal data,
+		// which better be done through the connection map.
+		r.conn.channel = channels[id]
 		if history := chatSession.storage.GetChannelHistory(r.conn.channel.Name); len(history) > 0 {
 			chatSession.sendMessage(types.BuildSysMsg(buildChatHistory(history), r.conn.ipAddr))
+		} else {
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Empty channel history"), r.conn.ipAddr))
 		}
-
-		r.prevState = r.state
-		r.substate = null
-		r.state = acceptMessagesState
-
-		return
+		r.updateState(stateAcceptingMessages)
+	} else {
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmt("Id %d is out of range", id), r.conn.ipAddr))
+		r.updateState(stateProcessingMenu)
 	}
-
-	chatSession.sendMessage(
-		types.BuildSysMsg(util.Fmt("ChannelID {%d} is out of range", channelID), r.conn.ipAddr),
-	)
-
-	r.substate = null
-	r.state = processMenuState
 }
 
 func (r *readerFSM) onAcceptMessagesState(chatSession *session) {
-	if !matchState(r.state, acceptMessagesState) {
-		log.Logger.Panic("Invalid %s state, expected %s", stateStr(r.state), stateStr(acceptMessagesState))
+	if !matchState(r.state, stateAcceptingMessages) {
+		log.Logger.Panic("Invalid %s state, expected %s", stateTable[r.state], stateTable[stateAcceptingMessages])
 	}
 
 	// The session has received a message from the client, thus the timout process
@@ -518,9 +454,9 @@ func (r *readerFSM) onAcceptMessagesState(chatSession *session) {
 	r.conn.abortConnectionTimeout <- struct{}{}
 
 	var msg *types.ChatMessage
-	if r.SKIP_USERDATA_PROCESSING {
-		index := rand.Intn(len(_FakeParticipantTable) - 1)
-		msg = types.BuildChatMsg(r.buffer.Bytes(), _FakeParticipantTable[index], r.conn.channel.Name)
+	if r._DEBUG_SkipUsedataProcessing {
+		index := rand.Intn(len(_DEBUG_FakeParticipantTable) - 1)
+		msg = types.BuildChatMsg(r.buffer.Bytes(), _DEBUG_FakeParticipantTable[index], r.conn.channel.Name)
 
 	} else {
 		// If the channel is an empty string, it won't pass the check inside the backend itself.
@@ -534,24 +470,14 @@ func (r *readerFSM) onAcceptMessagesState(chatSession *session) {
 	chatSession.sendMessage(msg)
 }
 
-func (r *readerFSM) onDisplayChatHistoryState(chatSession *session) {
-	if !matchState(r.state, displayingChatHistoryState) {
-		log.Logger.Info("Invalid %s state, expected %s", stateStr(r.state), stateStr(registerParticipantState))
-	}
-
-	if history := chatSession.storage.GetChatHistory(); len(history) > 0 {
-		chatSession.sendMessage(types.BuildSysMsg(buildChatHistory(history), r.conn.ipAddr))
-	}
-}
-
 func (r *readerFSM) onDisconnectState(chatSession *session) {
-	if !matchState(r.state, disconnectState) {
-		log.Logger.Panic("Invalid %s state, expected %s", stateStr(r.state), stateStr(disconnectState))
+	if !matchState(r.state, stateDisconnecting) {
+		log.Logger.Panic("Invalid %s state, expected %s", stateTable[r.state], stateTable[stateDisconnecting])
 	}
 
 	if r.conn.participant.Username != "" {
 		chatSession.sendMessage(
-			types.BuildSysMsg(util.Fmt("Participant {%s} disconnected", r.conn.participant.Username)),
+			types.BuildSysMsg(util.Fmtln("Participant %s disconnected", r.conn.participant.Username)),
 		)
 	}
 
@@ -562,6 +488,42 @@ func (r *readerFSM) onDisconnectState(chatSession *session) {
 
 	r.conn.netConn.Close()
 	chatSession.connMap.removeConn(r.conn.ipAddr)
+}
+
+func (r *readerFSM) updateState(newState readerState, newSubstate ...readerSubstate) {
+	if len(newSubstate) > 0 {
+		r.substate = newSubstate[0]
+	} else {
+		r.substate = substateNull
+	}
+	r.state = newState
+}
+
+func (r *readerFSM) displayChatHistory(chatSession *session) {
+	if history := chatSession.storage.GetChatHistory(); len(history) > 0 {
+		chatSession.sendMessage(types.BuildSysMsg(buildChatHistory(history), r.conn.ipAddr))
+		return
+	}
+	chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Empty chat history"), r.conn.ipAddr))
+}
+
+// Returns true if the channel list is non-empty, false otherwise
+func (r *readerFSM) displayChannels(chatSession *session) bool {
+	if channels := chatSession.storage.GetChannels(); len(channels) > 0 {
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln(buildChannelList(channels)), r.conn.ipAddr))
+		return true
+	}
+
+	chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Empty channel list"), r.conn.ipAddr))
+	return false
+}
+
+func (r *readerFSM) displayMembers(chatSession *session) {
+	if members := chatSession.storage.GetParticipants(); len(members) > 0 {
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln(buildMembersList(chatSession, members)), r.conn.ipAddr))
+		return
+	}
+	chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Empty member list"), r.conn.ipAddr))
 }
 
 func buildChatHistory(history []*types.ChatMessage) string {
