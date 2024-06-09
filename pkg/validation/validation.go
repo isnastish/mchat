@@ -1,16 +1,16 @@
-package session
+// Reference: https://github.com/google/re2/wiki/Syntax
+
+package validation
 
 import (
 	"regexp"
 	"strings"
 )
 
-// Reference: https://github.com/google/re2/wiki/Syntax
-
-func validatePassword(password string) bool {
-	// Password should contain at least 12 characters, but not exceed 32,
-	// at least one digit [0-9], one lower case letter [a-z], one upper case letter [A-Z],
-	// and one special character from a list: (@&$#%_)
+// Password should contain at least 12 characters, but not exceed 32,
+// at least one digit [0-9], one lower case letter [a-z], one upper case letter [A-Z],
+// and one special character from a list: (@&$#%_)
+func ValidatePassword(password string) bool {
 	re := regexp.MustCompile(`^[a-zA-Z0-9_@$#:&%]{12,32}$`)
 	hasDigitsRe := regexp.MustCompile("[!^0-9]")
 	hasLowerRe := regexp.MustCompile("[!^a-z]")
@@ -24,11 +24,11 @@ func validatePassword(password string) bool {
 		hasSymbolsRe.MatchString(password)
 }
 
-func validateName(name string) bool {
-	// Is used to validate participant's and channel's names.
-	// A name should be at least 8 characters long, but not exceed 32.
-	// And cannot start with a digit or an underscore  [0-9]|_.
-	// \w - [0-9A-Za-z_]
+// Is used to validate participant's and channel's names.
+// A name should be at least 8 characters long, but not exceed 32.
+// And cannot start with a digit or an underscore  [0-9]|_.
+// \w - [0-9A-Za-z_]
+func ValidateName(name string) bool {
 	re := regexp.MustCompile(`^[\w]{8,32}$`)
 	beginWithRe := regexp.MustCompile(`^[a-zA-Z]`)
 
@@ -36,7 +36,7 @@ func validateName(name string) bool {
 		beginWithRe.MatchString(name)
 }
 
-func validateEmailAddress(emailAddress string) bool {
+func ValidateEmail(email string) bool {
 	// TODO(alx): Handle quoted email addresses?
 
 	// Reference: https: //en.wikipedia.org/wiki/Email_address
@@ -47,11 +47,11 @@ func validateEmailAddress(emailAddress string) bool {
 	// 2. digits 0 to 9
 	// 3. printable characters !#$%&'*+-/=?^_`{|}~
 	// The maximum total length of the local-part of an email address is 64 octets.
-	if strings.Count(emailAddress, "@") != 1 {
+	if strings.Count(email, "@") != 1 {
 		return false
 	}
 
-	localPart, domainPart, _ := strings.Cut(emailAddress, "@")
+	localPart, domainPart, _ := strings.Cut(email, "@")
 
 	// dot cannot be the first or last character
 	if strings.HasPrefix(localPart, ".") ||
@@ -104,9 +104,10 @@ func validateEmailAddress(emailAddress string) bool {
 	return true
 }
 
-func validatePasswordSha256(sha256 string) bool {
-	// A password hashed with sha256 algorithm should only contain hexdigits uppercase characters.
-	// [0-9A-F] with the length of 64
+// A password hashed with sha256 algorithm should only contain hexdigits uppercase characters.
+// [0-9A-F] with the length of 64
+func ValidatePasswordSha256(passwordSha256 string) bool {
 	re := regexp.MustCompile("^[0-9A-F]+$")
-	return len(sha256) == 64 && re.MatchString(sha256)
+	return len(passwordSha256) == 64 &&
+		re.MatchString(passwordSha256)
 }

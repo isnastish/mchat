@@ -1,146 +1,135 @@
+// TODO: Introduce a limit on the input in a chat. Meaning that the client won't
+// be able to write more then, let's say, 1024 characters in a single messages,
+// because they simply won't be sent to the server.
 package client
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"os"
-	"strings"
 	"time"
 
-	lgr "github.com/isnastish/chat/pkg/logger"
+	"github.com/isnastish/chat/pkg/logger"
+	"github.com/isnastish/chat/pkg/types"
+	"github.com/isnastish/chat/pkg/utilities"
 )
 
-const retriesCount int32 = 5
-
-// Pull out in a separate package shared by both, client and a server?
-type Message struct {
-	data []byte
+type Config struct {
+	Network      string
+	Addr         string
+	RetriesCount int
 }
 
-type Client struct {
-	remoteConn net.Conn
-	network    string
-	address    string
-
-	quitCh chan struct{}
-
-	incommingCh chan Message
-	outgoingCh  chan Message
+type client struct {
+	config           *Config
+	remoteConn       net.Conn
+	quitChan         chan struct{}
+	incomingMessages chan *types.ChatMessage
+	outgoingMessages chan *types.ChatMessage
+	ctx              context.Context
+	cancel           context.CancelFunc
 }
 
-var log = lgr.NewLogger("debug")
+func CreateClient(config *Config) *client {
+	ctx, cancle := context.WithCancel(context.Background())
+	return &client{
+		config:           config,
+		quitChan:         make(chan struct{}),
+		incomingMessages: make(chan *types.ChatMessage),
+		outgoingMessages: make(chan *types.ChatMessage),
+		ctx:              ctx,
+		cancel:           cancle,
+	}
+}
 
-func NewClient(network, address string) (*Client, error) {
-	var remoteConn net.Conn
-	var nretries int32
-	var lastErr error
-
-	for nretries < retriesCount {
-		remoteConn, lastErr = net.Dial(network, address)
-		if lastErr != nil {
-			nretries++
-			log.Info("connection failed, retrying...")
-			time.Sleep(3000 * time.Millisecond)
-		} else {
-			log.Info("connected to remote session: %s", remoteConn.RemoteAddr().String())
-			break
+func (c *client) tryConnect(delay time.Duration) (net.Conn, bool) {
+	for retries := 0; ; retries++ {
+		sessionConn, err := net.Dial(c.config.Network, c.config.Addr)
+		if err == nil {
+			log.Logger.Info("Connected to %s", sessionConn.RemoteAddr().String())
+			return sessionConn, true
 		}
+		if retries >= c.config.RetriesCount {
+			return nil, false
+		}
+
+		log.Logger.Info("Attemp %d to connect failed, retrying in %v", retries, delay)
+
+		<-time.After(delay)
 	}
-
-	if nretries != 0 {
-		return nil, lastErr
-	}
-
-	c := Client{
-		network:    network,
-		address:    address,
-		remoteConn: remoteConn,
-
-		quitCh: make(chan struct{}),
-
-		incommingCh: make(chan Message),
-		outgoingCh:  make(chan Message),
-	}
-
-	return &c, nil
 }
 
-func (c *Client) Run() {
-	go c.recv()
-	go c.send()
+func (c *client) Run() {
+	conn, succeeded := c.tryConnect(2 * time.Second)
+	if !succeeded {
+		log.Logger.Error("Failed to connect")
+		return
+	}
+	c.remoteConn = conn
 
-Loop:
+	defer c.remoteConn.Close()
+
+	go c.handleRemoteConnection()
+	go c.processInput()
+
 	for {
 		select {
-		case msg := <-c.incommingCh:
-			msgStr := string(msg.data)
-			fmt.Printf("%s", msgStr)
+		case msg := <-c.incomingMessages:
+			fmt.Printf("%s", msg.Contents.String())
 
-		case msg := <-c.outgoingCh:
-			messageSize := len(msg.data)
+		case msg := <-c.outgoingMessages:
+			util.WriteBytes(c.remoteConn, msg.Contents)
 
-			var bytesWritten int
-			for bytesWritten < messageSize {
-				n, err := c.remoteConn.Write(msg.data[bytesWritten:])
-				if err != nil {
-					log.Error("failed to write to a remote connection: %s", err.Error())
-					break
-				}
-				bytesWritten += n
-			}
-			// if bytesWritten == messageSize {
-			// 	c.stats.MessagesSent.Add(1)
-			// } else {
-			// 	c.stats.MessagesDropped.Add(1)
-			// }
-			// log.Info().Msgf("sent message: %s", string(msg.data))
-
-		case <-c.quitCh:
-			break Loop
+		case <-c.ctx.Done():
+			return
 		}
 	}
-
-	c.remoteConn.Close()
 }
 
-func (c *Client) recv() {
-	buf := make([]byte, 4096)
-
+func (c *client) handleRemoteConnection() {
 	for {
-		nbytes, err := c.remoteConn.Read(buf)
-		if err != nil && err != io.EOF {
-			log.Error("failed to read from the remote connnection: %s", err.Error())
-			c.remoteConn.Close()
-			close(c.quitCh)
-			break
-		}
+		tmpBuf := make([]byte, 1024)
+		bytesRead, err := c.remoteConn.Read(tmpBuf)
+		buffer := bytes.NewBuffer(tmpBuf[:bytesRead] /*util.TrimWhitespaces(tmpBuf[:bytesRead])*/)
 
-		if nbytes == 0 {
-			log.Info("remote session closed the connection")
-			close(c.quitCh)
+		if err != nil && err != io.EOF {
+			log.Logger.Error("Failed to read from a remote connection %v", err)
+			c.cancel()
 			return
 		}
 
-		// log.Info().Msgf("%s", string(buf[:nBytes]))
-		// c.incommingCh <- buf[:nBytes]
+		if bytesRead == 0 { // io.EOF
+			log.Logger.Error("Remote closed the connection")
+			c.cancel()
+			return
+		}
 
-		c.incommingCh <- Message{data: buf[:nbytes]}
+		c.incomingMessages <- types.BuildChatMsg(buffer.Bytes(), "none")
 	}
 }
 
-func (c *Client) send() {
-	buf := make([]byte, 4096)
-	inputReader := bufio.NewReader(os.Stdin)
-
+func (c *client) processInput() {
+	reader := bufio.NewReader(os.Stdin)
 	for {
-		bytesRead, err := inputReader.Read(buf)
-		if err != nil && err != io.EOF {
-			log.Error("failed to read the input")
-			break
-		}
+		select {
+		case <-c.ctx.Done():
+			return
+		default:
+			tmpBuf := make([]byte, 1024)
+			bytesRead, err := reader.Read(tmpBuf)
+			buffer := bytes.NewBuffer(util.TrimWhitespaces(tmpBuf[:bytesRead]))
 
-		c.outgoingCh <- Message{data: []byte(strings.Trim(string(buf[:bytesRead]), " \\r\\n\\t\\f\\v"))}
+			// TODO: Try to recover somehow or close the remote connection?
+			if err != nil && err != io.EOF {
+				log.Logger.Error("Failed to read the input %v", err)
+				return
+			}
+
+			c.outgoingMessages <- types.BuildChatMsg(buffer.Bytes(), "none")
+		}
 	}
 }
