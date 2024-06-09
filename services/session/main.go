@@ -27,7 +27,7 @@ func main() {
 		backendType, _ := strconv.Atoi(dbBackend)
 		config.BackendType = backend.BackendType(backendType)
 	} else {
-		config.BackendType = backend.BackendTypeRedis
+		config.BackendType = backend.BackendTypeMemory
 	}
 
 	s := session.CreateSession(config)

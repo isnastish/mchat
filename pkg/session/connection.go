@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"net"
 	"strings"
@@ -159,6 +160,8 @@ func (cm *connectionMap) broadcastMessage(msg interface{}) int {
 	switch msg := msg.(type) {
 	case *types.ChatMessage:
 		senderWasSkipped := false
+		// Convert message into a canonical form, which includes the name of the sender and the time when the message was sent.
+		canonChatMsg := bytes.NewBuffer([]byte(util.Fmtln("{%s:%s} %s", msg.Sender, msg.SentTime, msg.Contents.String())))
 		for _, conn := range cm.connections {
 			if conn.matchState(connectedState) {
 				if !senderWasSkipped && strings.EqualFold(conn.participant.Username, msg.Sender) {
@@ -166,7 +169,7 @@ func (cm *connectionMap) broadcastMessage(msg interface{}) int {
 					continue
 				}
 
-				n, err := util.WriteBytes(conn.netConn, msg.Contents)
+				n, err := util.WriteBytes(conn.netConn, canonChatMsg)
 				if err != nil || (n != msg.Contents.Len()) {
 					log.Logger.Error("Failed to send a chat message to the participant: %s", conn.participant.Username)
 				} else {
@@ -176,6 +179,7 @@ func (cm *connectionMap) broadcastMessage(msg interface{}) int {
 		}
 
 	case *types.SysMessage:
+		// canonSysMsg := bytes.NewBuffer([]byte(util.Fmtln("{system:%s} %s", msg.SentTime, msg.Contents.String())))
 		if msg.Recipient != "" {
 			conn, exists := cm.connections[msg.Recipient]
 			if exists {

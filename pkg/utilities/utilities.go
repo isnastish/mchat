@@ -33,7 +33,7 @@ func WriteBytes(conn net.Conn, buffer *bytes.Buffer) (int, error) {
 }
 
 func TimeNowStr() string {
-	return time.Now().Format(time.DateTime)
+	return time.Now().Format(time.TimeOnly)
 }
 
 func Fmt(format string, args ...any) string {

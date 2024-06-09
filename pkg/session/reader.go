@@ -187,7 +187,7 @@ func (r *readerFSM) onJoiningState(chatSession *session) {
 
 	op, err := strconv.Atoi(r.buffer.String())
 	if err != nil {
-		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Option %s not supported", r.buffer.String()), r.conn.ipAddr))
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("{server: %s} Option %s not supported", util.TimeNowStr(), r.buffer.String()), r.conn.ipAddr))
 	}
 
 	// Since options in the UI start with an index 1
@@ -196,26 +196,26 @@ func (r *readerFSM) onJoiningState(chatSession *session) {
 	switch option(op) {
 	case opRegister:
 		if matchState(r.state, stateJoining) {
-			chatSession.sendMessage(types.BuildSysMsg("Username: ", r.conn.ipAddr))
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmt("{server: %s} enter username: ", util.TimeNowStr()), r.conn.ipAddr))
 			r.updateState(stateRegistration, substateReadingName)
 		} else {
-			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Already registered"), r.conn.ipAddr))
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("{server: %s} Already registered", util.TimeNowStr()), r.conn.ipAddr))
 		}
 
 	case opAuthenticate:
 		if matchState(r.state, stateJoining) {
-			chatSession.sendMessage(types.BuildSysMsg("Username: ", r.conn.ipAddr))
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmt("{server: %s} enter username: ", util.TimeNowStr()), r.conn.ipAddr))
 			r.updateState(stateAuthentication, substateReadingName)
 		} else {
-			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Already authenticated"), r.conn.ipAddr))
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("{server: %s} Already authenticated", util.TimeNowStr()), r.conn.ipAddr))
 		}
 
 	case opCreateChannel:
 		if !matchState(r.state, stateJoining) {
-			chatSession.sendMessage(types.BuildSysMsg("Channel name: ", r.conn.ipAddr))
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmt("{server: %s} enter channel name: ", util.TimeNowStr()), r.conn.ipAddr))
 			r.updateState(stateCreatingChannel, substateReadingName)
 		} else {
-			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Authentication required"), r.conn.ipAddr))
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("{server: %s} Authentication required", util.TimeNowStr()), r.conn.ipAddr))
 		}
 
 	case opSelectChannel:
@@ -223,11 +223,11 @@ func (r *readerFSM) onJoiningState(chatSession *session) {
 		// we set the state to be stateSlectingChannel and request to enter channel's id from the user
 		if r.conn.matchState(connectedState) {
 			if r.displayChannels(chatSession) {
-				chatSession.sendMessage(types.BuildSysMsg("channel id: ", r.conn.ipAddr))
+				chatSession.sendMessage(types.BuildSysMsg(util.Fmt("{server: %s} enter channel id: ", util.TimeNowStr()), r.conn.ipAddr))
 				r.updateState(stateSelectingChannel)
 			}
 		} else {
-			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Authentication required"), r.conn.ipAddr))
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("{server: %s} Authentication required", util.TimeNowStr()), r.conn.ipAddr))
 		}
 
 	case opListMembers:
@@ -235,14 +235,14 @@ func (r *readerFSM) onJoiningState(chatSession *session) {
 			r.displayMembers(chatSession)
 			r.updateState(stateAcceptingMessages)
 		} else {
-			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Authentication required"), r.conn.ipAddr))
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("{server: %s} Authentication required", util.TimeNowStr()), r.conn.ipAddr))
 		}
 
 	case opExit:
 		r.updateState(stateDisconnecting)
 
 	default:
-		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Invalid option %s", r.buffer.String()), r.conn.ipAddr))
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("{server: %s} Invalid option %s", util.TimeNowStr(), r.buffer.String()), r.conn.ipAddr))
 	}
 }
 
@@ -256,12 +256,12 @@ func (r *readerFSM) onRegisterParticipantState(chatSession *session) {
 	switch r.substate {
 	case substateReadingName:
 		r.conn.participant.Username = r.buffer.String()
-		chatSession.sendMessage(types.BuildSysMsg("Email: ", r.conn.ipAddr))
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmt("{server: %s} enter email: ", util.TimeNowStr()), r.conn.ipAddr))
 		r.updateState(r.state, substateReadingEmailAddress)
 
 	case substateReadingEmailAddress:
 		r.conn.participant.Email = r.buffer.String()
-		chatSession.sendMessage(types.BuildSysMsg("Password: ", r.conn.ipAddr))
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmt("{server: %s} enter password: ", util.TimeNowStr()), r.conn.ipAddr))
 		r.updateState(r.state, substateReadingPassword)
 
 	case substateReadingPassword:
@@ -278,7 +278,7 @@ func (r *readerFSM) onAuthParticipantState(chatSession *session) {
 	switch r.substate {
 	case substateReadingName:
 		r.conn.participant.Username = r.buffer.String()
-		chatSession.sendMessage(types.BuildSysMsg("Password: ", r.conn.ipAddr))
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmt("{server: %s} enter password: ", util.TimeNowStr()), r.conn.ipAddr))
 		r.updateState(r.state, substateReadingName)
 
 	case substateReadingPassword:
@@ -295,7 +295,7 @@ func (r *readerFSM) onCreateChannelState(chatSession *session) {
 	switch r.substate {
 	case substateReadingName:
 		r.conn.channel.Name = r.buffer.String()
-		chatSession.sendMessage(types.BuildSysMsg("Description: ", r.conn.ipAddr))
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmt("{server: %s} enter description: ", util.TimeNowStr()), r.conn.ipAddr))
 		r.updateState(r.state, substateReadingChannnelDesc)
 
 	case substateReadingChannnelDesc:
@@ -318,7 +318,7 @@ func (r *readerFSM) validate(chatSession *session) {
 
 		if !validation.ValidateName(r.conn.participant.Username) {
 			chatSession.sendMessage(
-				types.BuildSysMsg(util.Fmtln("Username %s not valid", r.conn.participant.Username), r.conn.ipAddr),
+				types.BuildSysMsg(util.Fmtln("{server: %s} Username %s not valid", util.TimeNowStr(), r.conn.participant.Username), r.conn.ipAddr),
 			)
 			r.updateState(stateJoining)
 			return
@@ -326,7 +326,7 @@ func (r *readerFSM) validate(chatSession *session) {
 
 		if !validation.ValidatePassword(r.conn.participant.Password) {
 			chatSession.sendMessage(
-				types.BuildSysMsg(util.Fmtln("Password {%s} not valid", r.conn.participant.Password), r.conn.ipAddr),
+				types.BuildSysMsg(util.Fmtln("{server: %s} Password {%s} not valid", util.TimeNowStr(), r.conn.participant.Password), r.conn.ipAddr),
 			)
 			r.updateState(stateJoining)
 			return
@@ -336,7 +336,7 @@ func (r *readerFSM) validate(chatSession *session) {
 			// TODO: Check whether it's a valid email address by sending a message.
 			if !validation.ValidateEmail(r.conn.participant.Email) {
 				chatSession.sendMessage(
-					types.BuildSysMsg(util.Fmtln("Email {%s} not valid", r.conn.participant.Email), r.conn.ipAddr),
+					types.BuildSysMsg(util.Fmtln("{server: %s} Email {%s} not valid", util.TimeNowStr(), r.conn.participant.Email), r.conn.ipAddr),
 				)
 				r.updateState(stateJoining)
 				return
@@ -344,7 +344,7 @@ func (r *readerFSM) validate(chatSession *session) {
 
 			if chatSession.storage.HasParticipant(r.conn.participant.Username) {
 				chatSession.sendMessage(
-					types.BuildSysMsg(util.Fmtln("Participant %s already exists", r.conn.participant.Username), r.conn.ipAddr),
+					types.BuildSysMsg(util.Fmtln("{server: %s} Participant %s already exists", util.TimeNowStr(), r.conn.participant.Username), r.conn.ipAddr),
 				)
 				r.updateState(stateJoining)
 				return
@@ -367,8 +367,8 @@ func (r *readerFSM) validate(chatSession *session) {
 		} else {
 			if !chatSession.storage.AuthParticipant(r.conn.participant) {
 				chatSession.sendMessage(
-					types.BuildSysMsg(util.Fmtln("Failed to authenticate participant %s. "+
-						"Username or password is incorrect.", r.conn.participant.Username), r.conn.ipAddr),
+					types.BuildSysMsg(util.Fmtln("{server: %s} Failed to authenticate participant %s. "+
+						"Username or password is incorrect.", util.TimeNowStr(), r.conn.participant.Username), r.conn.ipAddr),
 				)
 				r.updateState(stateJoining)
 				return
@@ -390,7 +390,7 @@ func (r *readerFSM) validate(chatSession *session) {
 		// Channel validation
 		if !validation.ValidateName(r.conn.channel.Name) {
 			chatSession.sendMessage(
-				types.BuildSysMsg(util.Fmtln("Channel name {%s} is invalid", r.conn.channel.Name), r.conn.ipAddr),
+				types.BuildSysMsg(util.Fmtln("{server: %s} Channel name {%s} is invalid", util.TimeNowStr(), r.conn.channel.Name), r.conn.ipAddr),
 			)
 			r.updateState(stateProcessingMenu)
 			return
@@ -398,7 +398,7 @@ func (r *readerFSM) validate(chatSession *session) {
 
 		if chatSession.storage.HasChannel(r.conn.channel.Name) {
 			chatSession.sendMessage(
-				types.BuildSysMsg(util.Fmtln("Channel {%s} already exist", r.conn.channel.Name), r.conn.ipAddr),
+				types.BuildSysMsg(util.Fmtln("{server: %s} Channel {%s} already exist", util.TimeNowStr(), r.conn.channel.Name), r.conn.ipAddr),
 			)
 			r.updateState(stateProcessingMenu)
 			return
@@ -418,7 +418,7 @@ func (r *readerFSM) onSelectChannelState(chatSession *session) {
 
 	id, err := strconv.Atoi(r.buffer.String())
 	if err != nil {
-		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Invalid channel id %s", r.buffer.String()), r.conn.ipAddr))
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("{server: %s} Invalid channel id %s", util.TimeNowStr(), r.buffer.String()), r.conn.ipAddr))
 		r.updateState(stateProcessingMenu)
 		return
 	}
@@ -433,11 +433,11 @@ func (r *readerFSM) onSelectChannelState(chatSession *session) {
 		if history := chatSession.storage.GetChannelHistory(r.conn.channel.Name); len(history) > 0 {
 			chatSession.sendMessage(types.BuildSysMsg(buildChatHistory(history), r.conn.ipAddr))
 		} else {
-			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Empty channel history"), r.conn.ipAddr))
+			chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("{server: %s} Empty channel history", util.TimeNowStr()), r.conn.ipAddr))
 		}
 		r.updateState(stateAcceptingMessages)
 	} else {
-		chatSession.sendMessage(types.BuildSysMsg(util.Fmt("Id %d is out of range", id), r.conn.ipAddr))
+		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("{server: %s} Id %d is out of range", util.TimeNowStr(), id), r.conn.ipAddr))
 		r.updateState(stateProcessingMenu)
 	}
 }
@@ -475,11 +475,9 @@ func (r *readerFSM) onDisconnectState(chatSession *session) {
 		log.Logger.Panic("Invalid %s state, expected %s", stateTable[r.state], stateTable[stateDisconnecting])
 	}
 
-	if r.conn.participant.Username != "" {
-		chatSession.sendMessage(
-			types.BuildSysMsg(util.Fmtln("Participant %s disconnected", r.conn.participant.Username)),
-		)
-	}
+	log.Logger.Info("Disconnected: %s", r.conn.ipAddr)
+
+	disconnectedUsername := r.conn.participant.Username
 
 	// If the context hasn't been canceled yet. Probably the client has chosen to exit the session.
 	// We need to invoke cancel() procedure in order for the disconnectIfIdle() goroutine to finish.
@@ -487,7 +485,13 @@ func (r *readerFSM) onDisconnectState(chatSession *session) {
 	r.conn.cancel()
 
 	r.conn.netConn.Close()
+
 	chatSession.connMap.removeConn(r.conn.ipAddr)
+
+	// Broadcast message to everyone containing a name of who was disconnected
+	chatSession.sendMessage(
+		types.BuildSysMsg(util.Fmtln("{server: %s} Participant %s disconnected", util.TimeNowStr(), disconnectedUsername)),
+	)
 }
 
 func (r *readerFSM) updateState(newState readerState, newSubstate ...readerSubstate) {
@@ -504,7 +508,7 @@ func (r *readerFSM) displayChatHistory(chatSession *session) {
 		chatSession.sendMessage(types.BuildSysMsg(buildChatHistory(history), r.conn.ipAddr))
 		return
 	}
-	chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Empty chat history"), r.conn.ipAddr))
+	chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("{server: %s} Empty chat history", util.TimeNowStr()), r.conn.ipAddr))
 }
 
 // Returns true if the channel list is non-empty, false otherwise
@@ -514,7 +518,7 @@ func (r *readerFSM) displayChannels(chatSession *session) bool {
 		return true
 	}
 
-	chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Empty channel list"), r.conn.ipAddr))
+	chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("{server: %s} Empty channel list", util.TimeNowStr()), r.conn.ipAddr))
 	return false
 }
 
@@ -523,13 +527,13 @@ func (r *readerFSM) displayMembers(chatSession *session) {
 		chatSession.sendMessage(types.BuildSysMsg(util.Fmtln(buildMembersList(chatSession, members)), r.conn.ipAddr))
 		return
 	}
-	chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("Empty member list"), r.conn.ipAddr))
+	chatSession.sendMessage(types.BuildSysMsg(util.Fmtln("{server: %s} Empty member list", util.TimeNowStr()), r.conn.ipAddr))
 }
 
 func buildChatHistory(history []*types.ChatMessage) string {
 	var builder strings.Builder
 	for _, msg := range history {
-		message := util.Fmt("{%s:%s} %s", msg.Sender, msg.SentTime, msg.Contents.String())
+		message := util.Fmtln("{%s:%s} %s", msg.Sender, msg.SentTime, msg.Contents.String())
 		builder.WriteString(message)
 	}
 	return builder.String()
@@ -540,7 +544,7 @@ func buildChannelList(channels []*types.Channel) string {
 
 	builder.WriteString("channels:\n")
 	for index, channel := range channels {
-		message := util.Fmt("\t{%d} :%s\n", index, channel.Name)
+		message := util.Fmtln("\t{%d} :%s", index, channel.Name)
 		builder.WriteString(message)
 	}
 	return builder.String()
@@ -555,10 +559,10 @@ func buildMembersList(chatSession *session, members []*types.Participant) string
 	builder.WriteString("members:\n")
 	for _, member := range members {
 		if chatSession.connMap.hasConnectedParticipant(member.Username) {
-			builder.WriteString(util.Fmt("\t{%-64s} *%s\n", member.Username, connStateTable[connectedState]))
+			builder.WriteString(util.Fmtln("\t{%-64s} *%s", member.Username, connStateTable[connectedState]))
 			continue
 		}
-		builder.WriteString(util.Fmt("\t{%-64s} *%s\n", member.Username, connStateTable[pendingState]))
+		builder.WriteString(util.Fmtln("\t{%-64s} *%s", member.Username, connStateTable[pendingState]))
 	}
 	return builder.String()
 }
