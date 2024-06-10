@@ -3,6 +3,15 @@
 // but rather reuse the memmory from the previous read by read() procedure.
 package session
 
+// TODO: Introduce a set of common commands, it should be very simple.
+// For example:
+//
+// :menu for displaying the menu
+// :listm <channel> for listing the members, takes a name of the channel as an optional parameter, in which case it lists all the members in that channel
+// :history <period> <channel> for displaying a chat history, it takes a parameter (a period of time for which to display the history and an optional channel name)
+// :listc list all channels
+// :commands displayes the list of available commands.
+
 import (
 	"bytes"
 	"io"
@@ -10,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/isnastish/chat/pkg/commands"
 	"github.com/isnastish/chat/pkg/logger"
 	"github.com/isnastish/chat/pkg/types"
 	"github.com/isnastish/chat/pkg/utilities"
@@ -176,6 +186,40 @@ func (r *readerFSM) read(chatSession *session) {
 	if bytesRead == 0 {
 		r.updateState(stateDisconnecting)
 	}
+
+	// TODO: Use processCommand function instead
+	// if !processCommand() {
+	// 	 ... 
+	// }
+
+	if command, found := commands.ParseCommand(r.buffer); found {
+		switch command {
+		case commands.CommandDisplayMenu:
+			// A menu will be displayed on the next frame
+			r.updateState(stateProcessingMenu)
+
+		case commands.CommandDisplayHistory:
+			if r.conn.matchState(connectedState) {
+				if chatHistory, contains := chatSession.storage.GetChatHistory(); contains {
+					chatSession.sendMessage(types.BuildSysMsg(util.Fmt(buildChatHistory(chatHistory)), r.conn.ipAddr))
+				}
+			} else {
+				
+			}
+
+		case commands.CommandListMembers:
+			if
+
+		case commands.CommandListChannels:
+
+		case commands.CommandListCommands:
+
+		}
+	}
+}
+
+func (r *readerFSM) processCommand(session *session) bool {
+
 }
 
 func (r *readerFSM) onJoiningState(chatSession *session) {

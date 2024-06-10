@@ -1,5 +1,6 @@
 // TODO: Improve metrics (probably redesign).
 // TODO: Pass settings for redis and dynamoDB backends (should be part of Config).
+// TODO: Experiment with UDP connection
 package session
 
 import (
