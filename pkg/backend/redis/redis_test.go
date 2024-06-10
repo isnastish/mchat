@@ -2,15 +2,14 @@
 package redis
 
 import (
-	"context"
-	"fmt"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/isnastish/chat/pkg/testsetup"
+
+	"github.com/isnastish/chat/pkg/backend"
 )
 
 func TestMain(m *testing.M) {
@@ -30,29 +29,31 @@ func TestMain(m *testing.M) {
 	}()
 }
 
-var redisEndpoint = "127.0.0.1:6379"
+var redisConfig = backend.RedisConfig{
+	Endpoint: "127.0.0.1:6379",
+	Password: "",
+	Username: "",
+}
 
-func clearChannels(t *testing.T) {
-	b, _ := NewRedisBackend(redisEndpoint)
+func clearChannels(rb *redisBackend, t *testing.T) {
 	for _, ch := range testsetup.Channels {
-		b.DeleteChannel(ch.Name)
-		assert.False(t, b.HasChannel(ch.Name))
+		rb.DeleteChannel(ch.Name)
+		assert.False(t, rb.HasChannel(ch.Name))
 	}
 }
 
-func clearParticipants(t *testing.T) {
-	b, _ := NewRedisBackend(redisEndpoint)
+func clearParticipants(rb *redisBackend, t *testing.T) {
 	for _, p := range testsetup.Participants {
-		b.deleteParticipant(p.Username)
-		assert.False(t, b.HasParticipant(p.Username))
+		rb.deleteParticipant(p.Username)
+		assert.False(t, rb.HasParticipant(p.Username))
 	}
 }
 
 func TestRegisterParticipant(t *testing.T) {
-	backend, err := NewRedisBackend(redisEndpoint)
+	backend, err := NewRedisBackend(&redisConfig)
 	assert.True(t, err == nil)
-	clearParticipants(t) // clear the state
-	defer clearParticipants(t)
+	clearParticipants(backend, t) // clear the state
+	defer clearParticipants(backend, t)
 	for _, p := range testsetup.Participants {
 		backend.RegisterParticipant(&p)
 		assert.True(t, backend.HasParticipant(p.Username))
@@ -62,30 +63,30 @@ func TestRegisterParticipant(t *testing.T) {
 }
 
 func TestParticipantAlreadyExists(t *testing.T) {
-	backend, err := NewRedisBackend(redisEndpoint)
+	backend, err := NewRedisBackend(&redisConfig)
 	assert.True(t, err == nil)
-	clearParticipants(t) // clear the state
-	defer clearParticipants(t)
+	clearParticipants(backend, t) // clear the state
+	defer clearParticipants(backend, t)
 	backend.RegisterParticipant(&testsetup.Participants[0])
 	assert.True(t, backend.HasParticipant(testsetup.Participants[0].Username))
 	assert.Panics(t, func() { backend.RegisterParticipant(&testsetup.Participants[0]) })
 }
 
 func TestRegisAuthenticateParticipant(t *testing.T) {
-	backend, err := NewRedisBackend(redisEndpoint)
+	backend, err := NewRedisBackend(&redisConfig)
 	assert.True(t, err == nil)
-	clearParticipants(t)
-	defer clearParticipants(t)
+	clearParticipants(backend, t)
+	defer clearParticipants(backend, t)
 	backend.RegisterParticipant(&testsetup.Participants[0])
 	assert.True(t, backend.HasParticipant(testsetup.Participants[0].Username))
 	assert.True(t, backend.AuthParticipant(&testsetup.Participants[0]))
 }
 
 func TestRegisterChannel(t *testing.T) {
-	backend, err := NewRedisBackend(redisEndpoint)
+	backend, err := NewRedisBackend(&redisConfig)
 	assert.True(t, err == nil)
-	clearChannels(t)
-	defer clearChannels(t)
+	clearChannels(backend, t)
+	defer clearChannels(backend, t)
 	for _, ch := range testsetup.Channels {
 		backend.RegisterChannel(&ch)
 		assert.True(t, backend.HasChannel(ch.Name))
@@ -95,10 +96,10 @@ func TestRegisterChannel(t *testing.T) {
 }
 
 func TestChannelAlreadyExists(t *testing.T) {
-	backend, err := NewRedisBackend(redisEndpoint)
+	backend, err := NewRedisBackend(&redisConfig)
 	assert.True(t, err == nil)
-	clearChannels(t)
-	defer clearChannels(t)
+	clearChannels(backend, t)
+	defer clearChannels(backend, t)
 	defer backend.DeleteChannel(testsetup.Channels[0].Name)
 	backend.RegisterChannel(&testsetup.Channels[0])
 	assert.True(t, backend.HasChannel(testsetup.Channels[0].Name))
@@ -106,7 +107,7 @@ func TestChannelAlreadyExists(t *testing.T) {
 }
 
 func TestStoreGeneralMessages(t *testing.T) {
-	backend, err := NewRedisBackend(redisEndpoint)
+	backend, err := NewRedisBackend(&redisConfig)
 	assert.True(t, err == nil)
 	defer func() {
 		backend.deleteMessages()
@@ -122,39 +123,23 @@ func TestStoreGeneralMessages(t *testing.T) {
 }
 
 func TestStoreChannelMessages(t *testing.T) {
-	b, err := NewRedisBackend(redisEndpoint)
+	backend, err := NewRedisBackend(&redisConfig)
 	assert.True(t, err == nil)
-	clearChannels(t)
-	defer clearChannels(t)
+	clearChannels(backend, t)
+	defer clearChannels(backend, t)
 	for _, ch := range testsetup.Channels {
-		b.RegisterChannel(&ch)
-		assert.True(t, b.HasChannel(ch.Name))
+		backend.RegisterChannel(&ch)
+		assert.True(t, backend.HasChannel(ch.Name))
 	}
 
 	defer func() {
-		b.deleteMessages(testsetup.Channels[0].Name)
-		assert.Equal(t, len(b.GetChannelHistory(testsetup.Channels[0].Name)), 0)
+		backend.deleteMessages(testsetup.Channels[0].Name)
+		assert.Equal(t, len(backend.GetChannelHistory(testsetup.Channels[0].Name)), 0)
 	}()
 	for _, msg := range testsetup.BooksChannelMessages {
-		b.StoreMessage(&msg)
+		backend.StoreMessage(&msg)
 	}
 
-	channelHistory := b.GetChannelHistory(testsetup.Channels[0].Name)
+	channelHistory := backend.GetChannelHistory(testsetup.Channels[0].Name)
 	assert.True(t, testsetup.Match(channelHistory, testsetup.BooksChannelMessages, testsetup.ContainsMessage))
-}
-
-func TestCtxCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		<-ctx.Done()
-		fmt.Println("func A was released")
-	}()
-	go func() {
-		<-ctx.Done()
-		fmt.Println("func B was released")
-	}()
-
-	<-time.After(2 * time.Second)
-	cancel()
-	cancel()
 }

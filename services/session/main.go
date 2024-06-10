@@ -1,15 +1,11 @@
-// TODO: Specify backend as a command-line argument.
-// Every config (for redis/dynamodb backends) should be passed to CreateSessio,
-// so need append the corresponding fields to SessionConfig struct
-// TODO: Rethink whether we need a session timeout at all.
 package main
 
 import (
 	"flag"
-	"os"
-	"strconv"
+	"strings"
 
 	"github.com/isnastish/chat/pkg/backend"
+	"github.com/isnastish/chat/pkg/logger"
 	"github.com/isnastish/chat/pkg/session"
 )
 
@@ -45,6 +41,9 @@ func main() {
 	case backend.BackendTypes[backend.BackendTypeMemory]:
 		log.Logger.Info("Running  memory backend")
 		config.BackendType = backend.BackendTypeMemory
+
+	default:
+		log.Logger.Panic("Unknown backend %s", *backendType)
 	}
 
 	s := session.CreateSession(config)

@@ -11,40 +11,40 @@ import (
 	"github.com/isnastish/chat/pkg/validation"
 )
 
-type MemoryBackend struct {
+type memoryBackend struct {
 	participants map[string]*types.Participant
 	chatHistory  []*types.ChatMessage
 	channels     map[string]*types.Channel
-	mu           sync.RWMutex
+	sync.RWMutex
 }
 
-func NewMemoryBackend() *MemoryBackend {
-	return &MemoryBackend{
+func NewMemoryBackend() *memoryBackend {
+	return &memoryBackend{
 		participants: make(map[string]*types.Participant),
 		chatHistory:  make([]*types.ChatMessage, 0, 1024),
 		channels:     make(map[string]*types.Channel),
 	}
 }
 
-func (m *MemoryBackend) doesParticipantExist(username string) bool {
+func (m *memoryBackend) doesParticipantExist(username string) bool {
 	_, exists := m.participants[username]
 	return exists
 }
 
-func (m *MemoryBackend) doesChannelExist(channelName string) bool {
+func (m *memoryBackend) doesChannelExist(channelName string) bool {
 	_, exists := m.channels[channelName]
 	return exists
 }
 
-func (b *MemoryBackend) HasParticipant(username string) bool {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return b.doesParticipantExist(username)
+func (m *memoryBackend) HasParticipant(username string) bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.doesParticipantExist(username)
 }
 
-func (m *MemoryBackend) RegisterParticipant(participant *types.Participant) {
-	m.mu.Lock()
-	defer m.mu.Unlock() // deferred in case of panic
+func (m *memoryBackend) RegisterParticipant(participant *types.Participant) {
+	m.Lock()
+	defer m.Unlock() // deferred in case of panic
 
 	if m.doesParticipantExist(participant.Username) {
 		log.Logger.Panic("Participant %s already exists", participant.Username)
@@ -65,9 +65,9 @@ func (m *MemoryBackend) RegisterParticipant(participant *types.Participant) {
 	log.Logger.Info("Registered %s participant", participant.Username)
 }
 
-func (m *MemoryBackend) AuthParticipant(participant *types.Participant) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (m *memoryBackend) AuthParticipant(participant *types.Participant) bool {
+	m.RLock()
+	defer m.RUnlock()
 
 	participant, exists := m.participants[participant.Username]
 	if exists {
@@ -78,9 +78,9 @@ func (m *MemoryBackend) AuthParticipant(participant *types.Participant) bool {
 	return false
 }
 
-func (m *MemoryBackend) StoreMessage(message *types.ChatMessage) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *memoryBackend) StoreMessage(message *types.ChatMessage) {
+	m.Lock()
+	defer m.Unlock()
 
 	msg := &types.ChatMessage{
 		Contents: bytes.NewBuffer(bytes.Clone(message.Contents.Bytes())),
@@ -103,15 +103,15 @@ func (m *MemoryBackend) StoreMessage(message *types.ChatMessage) {
 	}
 }
 
-func (m *MemoryBackend) HasChannel(channelname string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (m *memoryBackend) HasChannel(channelname string) bool {
+	m.RLock()
+	defer m.RUnlock()
 	return m.doesChannelExist(channelname)
 }
 
-func (m *MemoryBackend) RegisterChannel(channel *types.Channel) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *memoryBackend) RegisterChannel(channel *types.Channel) {
+	m.Lock()
+	defer m.Unlock()
 
 	if m.doesChannelExist(channel.Name) {
 		log.Logger.Panic("Channel %s already exists", channel.Name)
@@ -129,9 +129,9 @@ func (m *MemoryBackend) RegisterChannel(channel *types.Channel) {
 	log.Logger.Info("Registered %s channel", channel.Name)
 }
 
-func (m *MemoryBackend) DeleteChannel(channelname string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *memoryBackend) DeleteChannel(channelname string) bool {
+	m.Lock()
+	defer m.Unlock()
 	if !m.doesChannelExist(channelname) {
 		log.Logger.Panic("Deletion failed, channel %s doesn't exist", channelname)
 	}
@@ -142,15 +142,15 @@ func (m *MemoryBackend) DeleteChannel(channelname string) bool {
 	return true
 }
 
-func (m *MemoryBackend) GetChatHistory() []*types.ChatMessage {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (m *memoryBackend) GetChatHistory() []*types.ChatMessage {
+	m.RLock()
+	defer m.RUnlock()
 	return m.chatHistory
 }
 
-func (m *MemoryBackend) GetChannelHistory(channelname string) []*types.ChatMessage {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (m *memoryBackend) GetChannelHistory(channelname string) []*types.ChatMessage {
+	m.RLock()
+	defer m.RUnlock()
 
 	if !m.doesChannelExist(channelname) {
 		log.Logger.Panic("Failed to list chat history, channel %s doesn't exist", channelname)
@@ -160,9 +160,9 @@ func (m *MemoryBackend) GetChannelHistory(channelname string) []*types.ChatMessa
 	return channel.ChatHistory
 }
 
-func (m *MemoryBackend) GetChannels() []*types.Channel {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (m *memoryBackend) GetChannels() []*types.Channel {
+	m.RLock()
+	defer m.RUnlock()
 
 	var channels []*types.Channel
 	var chanCount = len(m.channels)
@@ -176,9 +176,9 @@ func (m *MemoryBackend) GetChannels() []*types.Channel {
 	return channels
 }
 
-func (m *MemoryBackend) GetParticipants() []*types.Participant {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (m *memoryBackend) GetParticipants() []*types.Participant {
+	m.RLock()
+	defer m.RUnlock()
 
 	var partList []*types.Participant
 	var partCount = len(m.participants)

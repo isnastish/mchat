@@ -1,8 +1,3 @@
-// NOTE: Participant, Channle, Participant/SystemMessage structs could be moved to a separate package.
-// That way we could reuse them easily, without pulling out the whole backend package.
-// Or it might be a sub-package of a backend. Since now the client has to duplicate the messages,
-// which could be avoided if we pull everything out into a seprate package.
-// Backend should provide an api to store the data and all the types should be in a seprate package.
 package backend
 
 import (
@@ -12,12 +7,19 @@ import (
 type BackendType int8
 
 const (
-	BackendTypeDynamodb BackendType = 0x01
-	BackendTypeRedis    BackendType = 0x02
-	BackendTypeMemory   BackendType = 0x03
+	BackendTypeDynamodb BackendType = 0
+	BackendTypeRedis    BackendType = 0x1
+	BackendTypeMemory   BackendType = 0x2
 )
 
-// TODO: Return raw slices []type.ChatMessage rather than slice of pointers.
+var BackendTypes [3]string
+
+func init() {
+	BackendTypes[BackendTypeDynamodb] = "dynamodb"
+	BackendTypes[BackendTypeRedis] = "redis"
+	BackendTypes[BackendTypeMemory] = "memory"
+}
+
 type Backend interface {
 	HasParticipant(username string) bool
 	RegisterParticipant(participant *types.Participant)
@@ -33,4 +35,19 @@ type Backend interface {
 	// ChanelAddMember(channelname string, member string)
 	// TODO: Add a capability for deleting single messages
 	// and deleting all the messages in a channel and in a general chat.
+}
+
+type RedisConfig struct {
+	Password string
+	Username string
+	Endpoint string
+}
+
+type DynamodbConfig struct {
+}
+
+type Config struct {
+	BackendType    BackendType
+	RedisConfig    *RedisConfig
+	DynamodbConfig *DynamodbConfig
 }
