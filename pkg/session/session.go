@@ -16,13 +16,13 @@ import (
 )
 
 type Config struct {
-	Network     string
-	Addr        string
-	BackendType backend.BackendType
-	// The timeout should be disable in a production,
-	// but in development it simplifies testing.
-	SessionTimeout     int64
-	ParticipantTimeout int64
+	Network string
+	Addr    string
+
+	SessionTimeout     time.Duration
+	ParticipantTimeout time.Duration
+
+	backend.Config
 }
 
 type metrics struct {
@@ -57,17 +57,23 @@ func CreateSession(config Config) *session {
 
 	switch config.BackendType {
 	case backend.BackendTypeRedis:
-		storage, err = redis.NewRedisBackend("127.0.0.1:6379")
+		if config.RedisConfig == nil {
+			log.Logger.Panic("Redis config is invalid")
+		}
+
+		storage, err = redis.NewRedisBackend(config.RedisConfig)
 		if err != nil {
-			log.Logger.Error("Failed to initialize redis backend: %s", err)
-			os.Exit(1)
+			log.Logger.Panic("Redis backend initialization failed %s", err)
 		}
 
 	case backend.BackendTypeDynamodb:
-		storage, err = dynamodb.NewDynamodbBackend()
+		if config.DynamodbConfig == nil {
+			log.Logger.Panic("Dynamodb config is invalid")
+		}
+
+		storage, err = dynamodb.NewDynamodbBackend(config.DynamodbConfig)
 		if err != nil {
-			log.Logger.Error("Failed to initialize dynamodb backend: %s", err)
-			os.Exit(1)
+			log.Logger.Panic("Dynamodb backend initialization failed %s", err)
 		}
 
 	case backend.BackendTypeMemory:
@@ -76,7 +82,7 @@ func CreateSession(config Config) *session {
 
 	session := &session{
 		connMap:                newConnectionMap(),
-		shutdownTimer:          time.NewTimer(time.Duration(config.SessionTimeout) * time.Second),
+		shutdownTimer:          time.NewTimer(config.SessionTimeout * time.Second),
 		shutdownSignal:         make(chan struct{}),
 		triggerShutdownProcess: make(chan struct{}),
 		listener:               listener,
@@ -122,7 +128,7 @@ func (s *session) Run() {
 
 		log.Logger.Info("Connected: %s", conn.RemoteAddr().String())
 
-		connection := newConn(conn, time.Duration(s.config.ParticipantTimeout)*time.Second)
+		connection := newConn(conn, s.config.ParticipantTimeout*time.Second)
 		s.connMap.addConn(connection)
 		go s.handleConnection(connection)
 
@@ -194,7 +200,7 @@ func (s *session) handleConnection(conn *connection) {
 	}
 
 	if s.connMap.empty() {
-		s.shutdownTimer.Reset(time.Duration(s.config.SessionTimeout))
+		s.shutdownTimer.Reset(s.config.SessionTimeout * time.Second)
 	}
 }
 

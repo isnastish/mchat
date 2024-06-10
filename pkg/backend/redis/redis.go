@@ -16,28 +16,33 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/isnastish/chat/pkg/backend"
 	"github.com/isnastish/chat/pkg/logger"
 	"github.com/isnastish/chat/pkg/types"
 	"github.com/isnastish/chat/pkg/utilities"
 	"github.com/isnastish/chat/pkg/validation"
 )
 
-type RedisBackend struct {
-	client *redis.Client
-	ctx    context.Context
-	mu     sync.RWMutex
+type Config struct {
+	Addr string
+	Port int
 }
 
-func NewRedisBackend(addr string) (*RedisBackend, error) {
+type redisBackend struct {
+	client *redis.Client
+	ctx    context.Context
+	sync.RWMutex
+}
+
+func NewRedisBackend(config *backend.RedisConfig) (*redisBackend, error) {
 	options := &redis.Options{
-		Addr:     addr,
+		Addr:     config.Endpoint,
 		Password: "",
-		DB:       0,
 	}
 
 	client := redis.NewClient(options)
 
-	rb := &RedisBackend{
+	rb := &redisBackend{
 		client: client,
 		ctx:    context.Background(),
 	}
@@ -47,28 +52,28 @@ func NewRedisBackend(addr string) (*RedisBackend, error) {
 	return rb, statusCode.Err()
 }
 
-func (r *RedisBackend) doesParticipantExist(participantUsername string) bool {
+func (r *redisBackend) doesParticipantExist(participantUsername string) bool {
 	isMember := r.client.SIsMember(r.ctx, "participants:", participantUsername)
 	return isMember.Val()
 }
 
-func (r *RedisBackend) doesChannelExist(channelname string) bool {
+func (r *redisBackend) doesChannelExist(channelname string) bool {
 	isMember := r.client.SIsMember(r.ctx, "channels:", channelname)
 	return isMember.Val()
 }
 
-func (r *RedisBackend) HasParticipant(username string) bool {
+func (r *redisBackend) HasParticipant(username string) bool {
 	// NOTE: Read lock will block until any open write lock is released.
 	// The Lock() method of the write lock will block if another process has either read or write lock
 	// until that lock is released.
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.RLock()
+	defer r.RUnlock()
 	return r.doesParticipantExist(username)
 }
 
-func (r *RedisBackend) RegisterParticipant(participant *types.Participant) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *redisBackend) RegisterParticipant(participant *types.Participant) {
+	r.Lock()
+	defer r.Unlock()
 
 	passwordHash := util.Sha256Checksum([]byte(participant.Password))
 	if !validation.ValidatePasswordSha256(passwordHash) {
@@ -109,9 +114,9 @@ func (r *RedisBackend) RegisterParticipant(participant *types.Participant) {
 }
 
 // NOTE: Not a part of a public API yet.
-func (r *RedisBackend) deleteParticipant(username string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *redisBackend) deleteParticipant(username string) {
+	r.Lock()
+	defer r.Unlock()
 
 	if r.doesParticipantExist(username) {
 		r.client.SRem(r.ctx, "participants:", username)
@@ -122,9 +127,9 @@ func (r *RedisBackend) deleteParticipant(username string) {
 	}
 }
 
-func (r *RedisBackend) AuthParticipant(participant *types.Participant) bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r *redisBackend) AuthParticipant(participant *types.Participant) bool {
+	r.RLock()
+	defer r.RUnlock()
 
 	if r.doesParticipantExist(participant.Username) {
 		participantHash := util.Sha256Checksum([]byte(participant.Username))
@@ -141,9 +146,9 @@ func (r *RedisBackend) AuthParticipant(participant *types.Participant) bool {
 	return false
 }
 
-func (r *RedisBackend) StoreMessage(message *types.ChatMessage) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *redisBackend) StoreMessage(message *types.ChatMessage) {
+	r.Lock()
+	defer r.Unlock()
 
 	var messagesKey string
 	var messageId string
@@ -178,9 +183,9 @@ func (r *RedisBackend) StoreMessage(message *types.ChatMessage) {
 	}
 }
 
-func (r *RedisBackend) GetChatHistory() []*types.ChatMessage {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r *redisBackend) GetChatHistory() []*types.ChatMessage {
+	r.RLock()
+	defer r.RUnlock()
 
 	messageKey := "messages/general:"
 
@@ -215,9 +220,9 @@ func (r *RedisBackend) GetChatHistory() []*types.ChatMessage {
 }
 
 // NOTE: Not a part of a public API yet.
-func (r *RedisBackend) deleteMessages(channels ...string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *redisBackend) deleteMessages(channels ...string) {
+	r.Lock()
+	defer r.Unlock()
 
 	if len(channels) != 0 {
 		for _, chName := range channels {
@@ -249,15 +254,15 @@ func (r *RedisBackend) deleteMessages(channels ...string) {
 	}
 }
 
-func (r *RedisBackend) HasChannel(channelname string) bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r *redisBackend) HasChannel(channelname string) bool {
+	r.RLock()
+	defer r.RUnlock()
 	return r.doesChannelExist(channelname)
 }
 
-func (r *RedisBackend) RegisterChannel(channel *types.Channel) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *redisBackend) RegisterChannel(channel *types.Channel) {
+	r.Lock()
+	defer r.Unlock()
 
 	if r.doesChannelExist(channel.Name) {
 		log.Logger.Panic("Channel %s already exists", channel.Name)
@@ -284,9 +289,9 @@ func (r *RedisBackend) RegisterChannel(channel *types.Channel) {
 	}
 }
 
-func (r *RedisBackend) DeleteChannel(channelname string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *redisBackend) DeleteChannel(channelname string) bool {
+	r.Lock()
+	defer r.Unlock()
 
 	if r.doesChannelExist(channelname) {
 		r.client.SRem(r.ctx, "channels:", channelname)
@@ -300,9 +305,9 @@ func (r *RedisBackend) DeleteChannel(channelname string) bool {
 	return false
 }
 
-func (r *RedisBackend) GetChannelHistory(channelname string) []*types.ChatMessage {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r *redisBackend) GetChannelHistory(channelname string) []*types.ChatMessage {
+	r.RLock()
+	defer r.RUnlock()
 
 	if !r.doesChannelExist(channelname) {
 		log.Logger.Panic("Failed to retrieve chat history, channel %s doesn't exist", channelname)
@@ -341,9 +346,9 @@ func (r *RedisBackend) GetChannelHistory(channelname string) []*types.ChatMessag
 	return nil
 }
 
-func (r *RedisBackend) GetChannels() []*types.Channel {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r *redisBackend) GetChannels() []*types.Channel {
+	r.RLock()
+	defer r.RUnlock()
 
 	members := r.client.SMembers(r.ctx, "channels:")
 	if len(members.Val()) == 0 {
@@ -378,9 +383,9 @@ func (r *RedisBackend) GetChannels() []*types.Channel {
 	return channels
 }
 
-func (r *RedisBackend) GetParticipants() []*types.Participant {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r *redisBackend) GetParticipants() []*types.Participant {
+	r.RLock()
+	defer r.RUnlock()
 
 	// TODO: Figure out how to use redis transactions in order to speed up the performance
 	// (reduce the amount of calls to the redis server)
