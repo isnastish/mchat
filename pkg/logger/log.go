@@ -62,7 +62,7 @@ func setLogLevel(level string) error {
 		return nil
 	}
 
-	return fmt.Errorf("undefined log level: %s", level)
+	return fmt.Errorf("Undefined log level: %s", level)
 }
 
 func (l *logger) log(level zerolog.Level, format string, args ...any) {

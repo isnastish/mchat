@@ -62,7 +62,6 @@ func CreateSession(config Config) *session {
 			log.Logger.Error("Failed to initialize redis backend: %s", err)
 			os.Exit(1)
 		}
-		log.Logger.Info("Using redis backend")
 
 	case backend.BackendTypeDynamodb:
 		storage, err = dynamodb.NewDynamodbBackend()
@@ -70,11 +69,9 @@ func CreateSession(config Config) *session {
 			log.Logger.Error("Failed to initialize dynamodb backend: %s", err)
 			os.Exit(1)
 		}
-		log.Logger.Info("Using dynamodb backend")
 
 	case backend.BackendTypeMemory:
 		storage = memory.NewMemoryBackend()
-		log.Logger.Info("Using memory backend")
 	}
 
 	session := &session{
