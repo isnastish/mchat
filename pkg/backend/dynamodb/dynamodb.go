@@ -7,81 +7,60 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	_ "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
-	"github.com/isnastish/chat/pkg/logger"
+	"github.com/isnastish/chat/pkg/backend"
+	_ "github.com/isnastish/chat/pkg/logger"
 	"github.com/isnastish/chat/pkg/types"
-	"github.com/isnastish/chat/pkg/utilities"
-	"github.com/isnastish/chat/pkg/validation"
+	_ "github.com/isnastish/chat/pkg/utilities"
+	_ "github.com/isnastish/chat/pkg/validation"
 )
 
-type DynamodbBackend struct {
+type dynamodbBackend struct {
 	client *dynamodb.Client
-	mu     sync.Mutex
+	sync.RWMutex
 }
 
-// HasParticipant(username string) bool
-// RegisterParticipant(participant *types.Participant)
-// AuthParticipant(participant *types.Participant) bool
-// StoreMessage(message *types.ChatMessage)
-// HasChannel(channelname string) bool
-// RegisterChannel(channel *types.Channel)
-// DeleteChannel(channelname string) bool
-// GetChatHistory() []*types.ChatMessage
-// GetChannelHistory(channelname string) []*types.ChatMessage
-// GetChannels() []*types.Channel
-// GetParticipantList() []*types.Participant
-
-func NewDynamodbBackend() (*DynamodbBackend, error) {
-	return &DynamodbBackend{}, nil
+func NewDynamodbBackend(config *backend.DynamodbConfig) (*dynamodbBackend, error) {
+	return &dynamodbBackend{}, nil
 }
 
-func (d *DynamodbBackend) HasParticipant(username string) bool {
+func (d *dynamodbBackend) HasParticipant(username string) bool {
 	return false
 }
 
-func (d *DynamodbBackend) RegisterParticipant(participant *types.Participant) {
-	d.mu.Lock()
-
-	// TODO: Check whether a participant already exists first
-
-	passwordHash := util.Sha256Checksum([]byte(participant.Password))
-	if validation.ValidatePasswordSha256(passwordHash) {
-		log.Logger.Panic("Failed to register participant %s. Password validation failed", participant.Username)
-	}
-
-	d.mu.Unlock()
+func (d *dynamodbBackend) RegisterParticipant(participant *types.Participant) {
 }
 
-func (d *DynamodbBackend) AuthParticipant(participant *types.Participant) bool {
+func (d *dynamodbBackend) AuthParticipant(participant *types.Participant) bool {
 	return false
 }
 
-func (d *DynamodbBackend) StoreMessage(message *types.ChatMessage) {
+func (d *dynamodbBackend) StoreMessage(message *types.ChatMessage) {
 
 }
 
-func (d *DynamodbBackend) HasChannel(channelname string) bool {
+func (d *dynamodbBackend) HasChannel(channelname string) bool {
 	return false
 }
 
-func (d *DynamodbBackend) RegisterChannel(channel *types.Channel) {
+func (d *dynamodbBackend) RegisterChannel(channel *types.Channel) {
 }
 
-func (d *DynamodbBackend) DeleteChannel(channelname string) bool {
+func (d *dynamodbBackend) DeleteChannel(channelname string) bool {
 	return false
 }
 
-func (d *DynamodbBackend) GetChatHistory() []*types.ChatMessage {
+func (d *dynamodbBackend) GetChatHistory() []*types.ChatMessage {
 	return nil
 }
 
-func (d *DynamodbBackend) GetChannelHistory(channelname string) []*types.ChatMessage {
+func (d *dynamodbBackend) GetChannelHistory(channelname string) []*types.ChatMessage {
 	return nil
 }
 
-func (d *DynamodbBackend) GetChannels() []*types.Channel {
+func (d *dynamodbBackend) GetChannels() []*types.Channel {
 	return nil
 }
 
-func (d *DynamodbBackend) GetParticipants() []*types.Participant {
+func (d *dynamodbBackend) GetParticipants() []*types.Participant {
 	return nil
 }
