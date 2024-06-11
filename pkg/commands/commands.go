@@ -2,27 +2,39 @@ package commands
 
 import (
 	"bytes"
-	_ "strings"
+	"strings"
+
+	"github.com/isnastish/chat/pkg/utilities"
 )
 
-type Command int8
+type CommandType int8
 
 const (
-	CommandDisplayMenu    Command = 0
-	CommandDisplayHistory Command = 0x1
-	CommandListMembers    Command = 0x2
-	CommandListChannels   Command = 0x3
-	CommandListCommands   Command = 0x4
+	CommandDisplayMenu    CommandType = 0
+	CommandDisplayHistory CommandType = 0x1
+	CommandListMembers    CommandType = 0x2
+	CommandListChannels   CommandType = 0x3
+	CommandListCommands   CommandType = 0x4
 
 	// TODO: Document
-	_CommandTerminal Command = 0x5
+	_CommandTerminal CommandType = 0x5
 )
+
+type ParseResult struct {
+	CommandType
+	Channel      string
+	TimeDuration string
+}
 
 type command struct {
 	name string
 	desc string
 	args []string
 }
+
+var commandTable []*command
+
+var CommandsBuilder strings.Builder
 
 func newCommand(name, desc string, args ...string) *command {
 	return &command{
@@ -32,8 +44,6 @@ func newCommand(name, desc string, args ...string) *command {
 	}
 }
 
-var commandTable []*command
-
 func init() {
 	commandTable = make([]*command, 0, _CommandTerminal-CommandDisplayMenu+1)
 
@@ -42,9 +52,16 @@ func init() {
 	commandTable[CommandListMembers] = newCommand(":members", "Display chat members", "<channel>")
 	commandTable[CommandListChannels] = newCommand(":channels", "Display all channels")
 	commandTable[CommandListCommands] = newCommand(":commands", "Display commands")
+
+	CommandsBuilder = strings.Builder{}
+	CommandsBuilder.WriteString("commands:\n")
+
+	for _, cmd := range commandTable {
+		cmdstr := util.Fmtln("\t%s %s\t%s", cmd.name, strings.Join(cmd.args, " "), cmd.desc)
+		CommandsBuilder.WriteString(cmdstr)
+	}
 }
 
-func ParseCommand(buf *bytes.Buffer) (Command, bool) {
-
-	return _CommandTerminal, false
+func ParseCommand(buf *bytes.Buffer) (*ParseResult, bool) {
+	return &ParseResult{}, false
 }
