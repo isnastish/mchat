@@ -203,10 +203,17 @@ func (r *readerFSM) read(session *session) {
 
 func (r *readerFSM) processCommand(session *session) bool {
 	if result, found := commands.ParseCommand(r.buffer); found {
+		if result.Error != nil {
+			// Notify a participant that command was processed but the error has occured
+			session.sendMsg(types.BuildSysMsg(util.Fmtln(result.Error.Error()), r.conn.ipAddr))
+			return true
+		}
+
 		switch result.CommandType {
 		case commands.CommandDisplayMenu:
 			r.updateState(stateProcessingMenu)
 
+		//  TODO: Do channel name validation
 		case commands.CommandDisplayHistory:
 			if r.conn.matchState(connectedState) {
 				if chathistory := session.storage.GetChatHistory(result.Channel); len(chathistory) > 0 {
@@ -350,6 +357,14 @@ func onAuthParticipantState(reader *readerFSM, session *session) {
 	case substateReadingName:
 		reader.conn.participant.Username = reader.buffer.String()
 		session.sendMsg(types.BuildSysMsg(util.Fmt("{server: %s} enter password: ", util.TimeNowStr()), reader.conn.ipAddr))
+		// TODO: Return the state/substate as a struct and assign it to reader's state
+		// The state itself can be packed into a struct
+		// type readerState struct {
+		//	 stateType
+		//   substate substateType
+		// }
+		// state := transitionTable[reader.state](reader, session)
+		// reader.state = state
 		reader.updateState(reader.state, substateReadingName)
 
 	case substateReadingPassword:

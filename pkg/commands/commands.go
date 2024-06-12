@@ -1,7 +1,10 @@
+// TODO: Register command arguments and then match them rather than doing manual parsing
+// :members --channel BooksChannel --period 8 (days) (maybe this will be more intuitive and simplify parsing)
 package commands
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 
 	"github.com/isnastish/chat/pkg/utilities"
@@ -22,14 +25,16 @@ const (
 
 type ParseResult struct {
 	CommandType
-	Channel      string
-	TimeDuration string
+	Channel string
+	Period  uint
+	Error   error
 }
 
 type command struct {
-	name string
-	desc string
-	args []string
+	name  string
+	desc  string
+	args  []string
+	_type CommandType
 }
 
 var commandTable []*command
@@ -63,5 +68,37 @@ func init() {
 }
 
 func ParseCommand(buf *bytes.Buffer) (*ParseResult, bool) {
-	return &ParseResult{}, false
+	if strings.HasPrefix(buf.String(), ":") {
+		arguments := strings.Split(buf.String(), " ")
+		result := &ParseResult{CommandType: _CommandTerminal}
+		for _, cmd := range commandTable {
+			if arguments[0] == cmd.name {
+				result.CommandType = cmd._type
+				if len(arguments) > 1 {
+
+					switch cmd._type {
+					case CommandDisplayHistory:
+						result.Channel = arguments[1]
+						if len(arguments) > 2 {
+							// NOTE: This functionality is not supported by the backend itself yet.
+							// Because the backend cannot filter messages based on the time period.
+							period, err := strconv.Atoi(arguments[2])
+							if err != nil || period < 0 {
+								result.Error = util.ErrorF("Argument %s doesn't match a time period", arguments[2])
+							} else {
+								result.Period = uint(period)
+							}
+						}
+					case CommandListMembers:
+						result.Channel = arguments[1]
+
+					default:
+						result.Error = util.ErrorF("Command %s doesn't accept arguments", cmd.name)
+					}
+				}
+				return result, true
+			}
+		}
+	}
+	return nil, false
 }

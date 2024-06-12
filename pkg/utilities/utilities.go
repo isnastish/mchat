@@ -5,8 +5,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -48,14 +46,18 @@ func TrimWhitespaces(src []byte) []byte {
 	return []byte(strings.Trim(string(src), " \r\n\v\t\f"))
 }
 
-func ClearScreen() {
-	// TODO: Once the user entered all the data, the screen has to be cleared on its side.
-	// So we have enough space for dispalying messages.
-	cmd := exec.Command("clear")
-	cmd.Stdout = os.Stdout
-	cmd.Run()
-}
-
 func Sleep(duration int64) {
 	<-time.After(time.Duration(duration) * time.Millisecond)
 }
+
+func ErrorF(format string, args ...any) error {
+	return fmt.Errorf(format, args...)
+}
+
+// func ClearScreen() {
+// 	// TODO: Once the user entered all the data, the screen has to be cleared on its side.
+// 	// So we have enough space for dispalying messages.
+// 	cmd := exec.Command("clear")
+// 	cmd.Stdout = os.Stdout
+// 	cmd.Run()
+// }

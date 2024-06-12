@@ -167,6 +167,9 @@ func (s *session) handleConnection(conn *connection) {
 		if !reader.processCommand(s) {
 
 			if !reader._DEBUG_SkipUserdataProcessing {
+				// transitionTable[reader.state](reader, s)
+				// TODO: Use the transitionTable[reader.state](reader, s) instead of a giant switch statement
+				// we only need to make a look up in a table which invokes the corresponding callback.
 				switch {
 				case matchState(reader.state, stateJoining):
 					transitionTable[stateJoining](reader, s)
@@ -191,12 +194,12 @@ func (s *session) handleConnection(conn *connection) {
 				}
 			} else {
 				reader.updateState(stateAcceptingMessages)
-				transitionTable[stateAcceptingMessages](reader, s)
+				transitionTable[reader.state](reader, s)
 			}
 		}
 
 		if matchState(reader.state, stateDisconnecting) {
-			transitionTable[stateDisconnecting](reader, s)
+			transitionTable[reader.state](reader, s)
 			break
 		}
 	}
