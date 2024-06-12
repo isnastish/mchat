@@ -1,5 +1,6 @@
 // TODO: Register command arguments and then match them rather than doing manual parsing
-// :members --channel BooksChannel --period 8 (days) (maybe this will be more intuitive and simplify parsing)
+// :history --channel BooksChannel --period 8 (days) (maybe this will be more intuitive and simplify parsing)
+// :members --channel ProgrammingChannel
 package commands
 
 import (
@@ -13,6 +14,7 @@ import (
 type CommandType int8
 
 const (
+	// CommandNull = 0
 	CommandDisplayMenu    CommandType = 0
 	CommandDisplayHistory CommandType = 0x1
 	CommandListMembers    CommandType = 0x2
@@ -50,7 +52,7 @@ func newCommand(name, desc string, args ...string) *command {
 }
 
 func init() {
-	commandTable = make([]*command, 0, _CommandTerminal-CommandDisplayMenu+1)
+	commandTable = make([]*command, _CommandTerminal-CommandDisplayMenu)
 
 	commandTable[CommandDisplayMenu] = newCommand(":menu", "Display menu")
 	commandTable[CommandDisplayHistory] = newCommand(":history", "Display chat history", "<channel>", "<period>")
@@ -67,6 +69,7 @@ func init() {
 	}
 }
 
+// TODO: Pass a string builder?
 func ParseCommand(buf *bytes.Buffer) (*ParseResult, bool) {
 	if strings.HasPrefix(buf.String(), ":") {
 		arguments := strings.Split(buf.String(), " ")
