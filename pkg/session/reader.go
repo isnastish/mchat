@@ -204,13 +204,13 @@ func (r *readerFSM) read(session *session) {
 }
 
 func (r *readerFSM) processCommand(session *session) bool {
-	if result, found := commands.ParseCommand(r.buffer); found {
-		if result.Error != nil {
-			// Notify a participant that command was processed but the error has occured
-			session.sendMsg(types.BuildSysMsg(util.Fmtln(result.Error.Error()), r.conn.ipAddr))
-			return true
-		}
+	result := commands.ParseCommand(r.buffer)
+	if result.Error != nil {
+		session.sendMsg(types.BuildSysMsg(result.Error.Error(), r.conn.ipAddr))
+		return true
+	}
 
+	if result.Matched {
 		switch result.CommandType {
 		case commands.CommandDisplayMenu:
 			r.updateState(stateProcessingMenu)

@@ -12,21 +12,41 @@ import (
 type CommandType int8
 
 const (
-	CommandNull                       = 0
-	CommandDisplayMenu    CommandType = 0x1
-	CommandDisplayHistory CommandType = 0x2
-	CommandListMembers    CommandType = 0x3
-	CommandListChannels   CommandType = 0x4
-	CommandListCommands   CommandType = 0x5
+	CommandNull CommandType = iota
+	CommandDisplayMenu
+	CommandDisplayHistory
+	CommandListMembers
+	CommandListChannels
+	CommandListCommands
 
-	_Sentinel CommandType = 0x6
+	// This type should always be the last
+	commandSentinel
 )
+
+type errorType int8
+
+const (
+	errorSuccess errorType = iota
+	errorUnexpectedArgument
+	errorArgumentNotSpecified
+	errorInvalidValue
+	errorUnrecognizedArgument
+
+	// This type should always be the last
+	errorSentinel
+)
+
+type parseError struct {
+	t   errorType
+	msg string
+}
 
 type ParseResult struct {
 	CommandType
 	Channel string
 	Period  uint
-	Error   error
+	Error   *parseError
+	Matched bool
 }
 
 type option struct {
@@ -42,7 +62,8 @@ type command struct {
 	_type   CommandType
 }
 
-var commandTable []*command
+var errorsTable []string
+var commandTable []*command // replace with a map as well?
 var CommandsBuilder strings.Builder
 
 func newCommand(name, desc string, options ...*option) *command {
@@ -59,14 +80,14 @@ func (c *command) addOption(name, arg, hint string) *command {
 }
 
 func index(cmd CommandType) int {
-	if cmd <= CommandNull || cmd >= _Sentinel {
+	if cmd <= CommandNull || cmd >= commandSentinel {
 		log.Logger.Panic("Index out of range")
 	}
 	return int(cmd - CommandDisplayMenu)
 }
 
 func init() {
-	commandTable = make([]*command, _Sentinel-CommandNull-1)
+	commandTable = make([]*command, commandSentinel-CommandNull-1)
 
 	commandTable[index(CommandDisplayMenu)] = newCommand(":menu", "Display menu")
 	commandTable[index(CommandDisplayHistory)] =
@@ -78,6 +99,13 @@ func init() {
 			addOption("-channel", "<name>", "Channel's name")
 	commandTable[index(CommandListChannels)] = newCommand(":channels", "Display all channels")
 	commandTable[index(CommandListCommands)] = newCommand(":commands", "Display commands")
+
+	errorsTable = make([]string, errorSentinel-errorSuccess)
+	errorsTable[errorSuccess] = "Success"
+	errorsTable[errorUnexpectedArgument] = "Unexpected argument"
+	errorsTable[errorArgumentNotSpecified] = "Argument not specified"
+	errorsTable[errorInvalidValue] = "Invalid value"
+	errorsTable[errorUnrecognizedArgument] = "Unregognized argument"
 
 	CommandsBuilder = strings.Builder{}
 	CommandsBuilder.WriteString("commands:\n")
@@ -91,53 +119,75 @@ func init() {
 	}
 }
 
-func ParseCommand(buffer *bytes.Buffer) (*ParseResult, bool) {
+// TODO: Handle zero error, because the look up will fail,
+// probably introduce a sentinel node as well
+func (e *parseError) Error() string {
+	return util.Fmtln("error: %s", errorsTable[e.t]+" "+e.msg)
+}
+
+func ParseCommand(buffer *bytes.Buffer) *ParseResult {
 	builder := strings.Builder{}
 	builder.WriteString(buffer.String())
 
+	result := &ParseResult{CommandType: commandSentinel}
 	if strings.HasPrefix(builder.String(), ":") {
 		arguments := strings.Split(builder.String(), " ")
-		result := &ParseResult{CommandType: _Sentinel}
 		for _, cmd := range commandTable {
 			if strings.ToLower(arguments[0]) == cmd.name {
 				result.CommandType = cmd._type
-				for i := 1; i < len(arguments); i += 2 { // skip the first argument
-					if i > len(cmd.options) {
-						// result.Error = util.ErrorF("Unrecognized option %s", arguments[i])
-						result.Error = util.ErrorF("Unexpected option")
-						return result, true
+				optionIndex := 0
+				for i := 1; i < len(arguments); i += 2 {
+					if optionIndex >= len(cmd.options) {
+						result.Error = &parseError{
+							t:   errorUnexpectedArgument,
+							msg: util.Fmt("%s", arguments[i])}
+						return result
 					}
 
-					// was the last argument
 					if i == len(arguments)-1 {
-						result.Error = util.ErrorF("Argument not specified")
-						return result, true
+						result.Error = &parseError{t: errorArgumentNotSpecified}
+						return result
 					}
 
-					// iterate over all the options since they might be in a different order
 					for _, opt := range cmd.options {
 						if arguments[i] == opt.name {
 							if opt.name == "-channel" {
 								result.Channel = arguments[i+1]
+								result.Matched = true
 								break
 
 							} else if opt.name == "-period" {
 								count, err := strconv.Atoi(arguments[i+1])
-								if err != nil {
-									result.Error = util.ErrorF("Invalid period %s", arguments[i+1])
-
-								} else if count < 0 {
-									result.Error = util.ErrorF("")
+								if err != nil || count < 0 {
+									result.Error = &parseError{
+										t:   errorInvalidValue,
+										msg: util.Fmt("period %s", arguments[i+1])}
+									return result
 								}
 
 								result.Period = uint(count)
+								result.Matched = true
+								break
 							}
 						}
 					}
+
+					// The error is set when a command expects some arguments/options,
+					// but none matched.
+					if !result.Matched {
+						result.Error = &parseError{
+							t:   errorUnrecognizedArgument,
+							msg: arguments[i],
+						}
+						return result
+					}
+
+					optionIndex++
 				}
-				return result, true
+				return result
 			}
 		}
 	}
-	return nil, false
+
+	return result
 }

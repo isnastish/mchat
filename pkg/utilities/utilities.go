@@ -49,15 +49,3 @@ func TrimWhitespaces(src []byte) []byte {
 func Sleep(duration int64) {
 	<-time.After(time.Duration(duration) * time.Millisecond)
 }
-
-func ErrorF(format string, args ...any) error {
-	return fmt.Errorf(format, args...)
-}
-
-// func ClearScreen() {
-// 	// TODO: Once the user entered all the data, the screen has to be cleared on its side.
-// 	// So we have enough space for dispalying messages.
-// 	cmd := exec.Command("clear")
-// 	cmd.Stdout = os.Stdout
-// 	cmd.Run()
-// }
