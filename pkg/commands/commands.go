@@ -1,6 +1,3 @@
-// TODO: Register command arguments and then match them rather than doing manual parsing
-// :history --channel BooksChannel --period 8 (days) (maybe this will be more intuitive and simplify parsing)
-// :members --channel ProgrammingChannel
 package commands
 
 import (
@@ -8,21 +5,21 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/isnastish/chat/pkg/logger"
 	"github.com/isnastish/chat/pkg/utilities"
 )
 
 type CommandType int8
 
 const (
-	// CommandNull = 0
-	CommandDisplayMenu    CommandType = 0
-	CommandDisplayHistory CommandType = 0x1
-	CommandListMembers    CommandType = 0x2
-	CommandListChannels   CommandType = 0x3
-	CommandListCommands   CommandType = 0x4
+	CommandNull                       = 0
+	CommandDisplayMenu    CommandType = 0x1
+	CommandDisplayHistory CommandType = 0x2
+	CommandListMembers    CommandType = 0x3
+	CommandListChannels   CommandType = 0x4
+	CommandListCommands   CommandType = 0x5
 
-	// TODO: Document
-	_CommandTerminal CommandType = 0x5
+	_Sentinel CommandType = 0x6
 )
 
 type ParseResult struct {
@@ -32,71 +29,110 @@ type ParseResult struct {
 	Error   error
 }
 
+type option struct {
+	name string
+	arg  string
+	hint string
+}
+
 type command struct {
-	name  string
-	desc  string
-	args  []string
-	_type CommandType
+	name    string
+	desc    string
+	options []*option
+	_type   CommandType
 }
 
 var commandTable []*command
-
 var CommandsBuilder strings.Builder
 
-func newCommand(name, desc string, args ...string) *command {
+func newCommand(name, desc string, options ...*option) *command {
 	return &command{
-		name: name,
-		desc: desc,
-		args: args,
+		name:    name,
+		desc:    desc,
+		options: options,
 	}
 }
 
-func init() {
-	commandTable = make([]*command, _CommandTerminal-CommandDisplayMenu)
+func (c *command) addOption(name, arg, hint string) *command {
+	c.options = append(c.options, &option{name: name, arg: arg, hint: hint})
+	return c
+}
 
-	commandTable[CommandDisplayMenu] = newCommand(":menu", "Display menu")
-	commandTable[CommandDisplayHistory] = newCommand(":history", "Display chat history", "<channel>", "<period>")
-	commandTable[CommandListMembers] = newCommand(":members", "Display chat members", "<channel>")
-	commandTable[CommandListChannels] = newCommand(":channels", "Display all channels")
-	commandTable[CommandListCommands] = newCommand(":commands", "Display commands")
+func index(cmd CommandType) int {
+	if cmd <= CommandNull || cmd >= _Sentinel {
+		log.Logger.Panic("Index out of range")
+	}
+	return int(cmd - CommandDisplayMenu)
+}
+
+func init() {
+	commandTable = make([]*command, _Sentinel-CommandNull-1)
+
+	commandTable[index(CommandDisplayMenu)] = newCommand(":menu", "Display menu")
+	commandTable[index(CommandDisplayHistory)] =
+		newCommand(":history", "Display chat history").
+			addOption("-channel", "<name>", "Channel's name").
+			addOption("-period", "<n>", "Time period")
+	commandTable[index(CommandListMembers)] =
+		newCommand(":members", "Display chat members").
+			addOption("-channel", "<name>", "Channel's name")
+	commandTable[index(CommandListChannels)] = newCommand(":channels", "Display all channels")
+	commandTable[index(CommandListCommands)] = newCommand(":commands", "Display commands")
 
 	CommandsBuilder = strings.Builder{}
 	CommandsBuilder.WriteString("commands:\n")
 
 	for _, cmd := range commandTable {
-		cmdstr := util.Fmtln("\t%s %s\t%s", cmd.name, strings.Join(cmd.args, " "), cmd.desc)
-		CommandsBuilder.WriteString(cmdstr)
+		CommandsBuilder.WriteString(util.Fmtln("%-20s\t%s", cmd.name, cmd.desc))
+		for _, opt := range cmd.options {
+			CommandsBuilder.WriteString(util.Fmtln("%-20s\t%s %s %s", "", opt.name, opt.arg, opt.hint))
+		}
+		CommandsBuilder.WriteString("\r\n")
 	}
 }
 
-// TODO: Pass a string builder?
-func ParseCommand(buf *bytes.Buffer) (*ParseResult, bool) {
-	if strings.HasPrefix(buf.String(), ":") {
-		arguments := strings.Split(buf.String(), " ")
-		result := &ParseResult{CommandType: _CommandTerminal}
-		for _, cmd := range commandTable {
-			if arguments[0] == cmd.name {
-				result.CommandType = cmd._type
-				if len(arguments) > 1 {
+func ParseCommand(buffer *bytes.Buffer) (*ParseResult, bool) {
+	builder := strings.Builder{}
+	builder.WriteString(buffer.String())
 
-					switch cmd._type {
-					case CommandDisplayHistory:
-						result.Channel = arguments[1]
-						if len(arguments) > 2 {
-							// NOTE: This functionality is not supported by the backend itself yet.
-							// Because the backend cannot filter messages based on the time period.
-							period, err := strconv.Atoi(arguments[2])
-							if err != nil || period < 0 {
-								result.Error = util.ErrorF("Argument %s doesn't match a time period", arguments[2])
-							} else {
-								result.Period = uint(period)
+	if strings.HasPrefix(builder.String(), ":") {
+		arguments := strings.Split(builder.String(), " ")
+		result := &ParseResult{CommandType: _Sentinel}
+		for _, cmd := range commandTable {
+			if strings.ToLower(arguments[0]) == cmd.name {
+				result.CommandType = cmd._type
+				for i := 1; i < len(arguments); i += 2 { // skip the first argument
+					if i > len(cmd.options) {
+						// result.Error = util.ErrorF("Unrecognized option %s", arguments[i])
+						result.Error = util.ErrorF("Unexpected option")
+						return result, true
+					}
+
+					// was the last argument
+					if i == len(arguments)-1 {
+						result.Error = util.ErrorF("Argument not specified")
+						return result, true
+					}
+
+					// iterate over all the options since they might be in a different order
+					for _, opt := range cmd.options {
+						if arguments[i] == opt.name {
+							if opt.name == "-channel" {
+								result.Channel = arguments[i+1]
+								break
+
+							} else if opt.name == "-period" {
+								count, err := strconv.Atoi(arguments[i+1])
+								if err != nil {
+									result.Error = util.ErrorF("Invalid period %s", arguments[i+1])
+
+								} else if count < 0 {
+									result.Error = util.ErrorF("")
+								}
+
+								result.Period = uint(count)
 							}
 						}
-					case CommandListMembers:
-						result.Channel = arguments[1]
-
-					default:
-						result.Error = util.ErrorF("Command %s doesn't accept arguments", cmd.name)
 					}
 				}
 				return result, true

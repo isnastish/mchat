@@ -41,8 +41,7 @@ const (
 )
 
 const (
-	stateNull readerState = 0
-
+	stateNull              readerState = 0
 	stateJoining           readerState = 0x1
 	stateRegistration      readerState = 0x2
 	stateAuthentication    readerState = 0x3
@@ -51,6 +50,8 @@ const (
 	stateSelectingChannel  readerState = 0x6
 	stateProcessingMenu    readerState = 0x7
 	stateDisconnecting     readerState = 0x8
+
+	_sentinel readerState = 0x9
 )
 
 const (
@@ -120,6 +121,7 @@ func init() {
 	stateTable[stateDisconnecting] = "StateDisconnecting"
 
 	// init transition table
+	transitionTable = make(map[readerState]transitionCallback, _sentinel-stateNull-1)
 	transitionTable[stateJoining] = onJoiningState
 	transitionTable[stateRegistration] = onRegisterParticipantState
 	transitionTable[stateAuthentication] = onAuthParticipantState

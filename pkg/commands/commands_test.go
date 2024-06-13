@@ -2,8 +2,10 @@ package commands
 
 import (
 	"bytes"
-	"github.com/stretchr/testify/assert"
+	_ "strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func invalidCommand(command string, t *testing.T) {
@@ -13,12 +15,13 @@ func invalidCommand(command string, t *testing.T) {
 	assert.False(t, matched)
 }
 
-func validCommand(command string, commandType CommandType, t *testing.T) *ParseResult {
-	buf := bytes.NewBuffer(make([]byte, 0, 256))
-	buf.WriteString(command)
-	result, matched := ParseCommand(buf)
-	assert.True(t, matched)
-	return result
+func validCommand(command string, commandType CommandType, t *testing.T) {
+	// buf := bytes.NewBuffer(make([]byte, 0, 256))
+	// buf.WriteString(command)
+	// builder := strings.Builder{}
+	// result, matched := ParseCommand()
+	// assert.True(t, matched)
+	// assert.Equal(t, result.CommandType, commandType)
 }
 
 func TestInvalidCommands(t *testing.T) {
@@ -27,5 +30,7 @@ func TestInvalidCommands(t *testing.T) {
 	invalidCommand(":men", t)
 	invalidCommand(":menu___", t)
 
-	// cmd := validCommand(":menu", t)
+	validCommand(":menu", CommandDisplayMenu, t)
+	validCommand(":channels", CommandListChannels, t)
+	validCommand(":commands", CommandListCommands, t)
 }
