@@ -31,36 +31,36 @@ type readerSubstate int8
 type option int8
 
 const (
-	opRegister      option = 0
-	opAuthenticate  option = 0x1
-	opCreateChannel option = 0x2
-	opSelectChannel option = 0x3
-	opListMembers   option = 0x4
-	opDisplayChat   option = 0x5
-	opExit          option = 0x6
+	opRegister option = iota
+	opAuthenticate
+	opCreateChannel
+	opSelectChannel
+	opListMembers
+	opDisplayChat
+	opExit
 )
 
 const (
-	stateNull              readerState = 0
-	stateJoining           readerState = 0x1
-	stateRegistration      readerState = 0x2
-	stateAuthentication    readerState = 0x3
-	stateAcceptingMessages readerState = 0x4
-	stateCreatingChannel   readerState = 0x5
-	stateSelectingChannel  readerState = 0x6
-	stateProcessingMenu    readerState = 0x7
-	stateDisconnecting     readerState = 0x8
+	stateNull readerState = iota
+	stateJoining
+	stateRegistration
+	stateAuthentication
+	stateAcceptingMessages
+	stateCreatingChannel
+	stateSelectingChannel
+	stateProcessingMenu
+	stateDisconnecting
 
-	_sentinel readerState = 0x9
+	// This state should be the last
+	stateSentinel
 )
 
 const (
-	substateNull readerSubstate = 0
-
-	substateReadingName         readerSubstate = 0x1
-	substateReadingPassword     readerSubstate = 0x2
-	substateReadingEmailAddress readerSubstate = 0x3
-	substateReadingChannnelDesc readerSubstate = 0x4
+	substateNull readerSubstate = iota
+	substateReadingName
+	substateReadingPassword
+	substateReadingEmailAddress
+	substateReadingChannnelDesc
 	// substate_Reading        readerSubstate = 0x5
 )
 
@@ -121,7 +121,7 @@ func init() {
 	stateTable[stateDisconnecting] = "StateDisconnecting"
 
 	// init transition table
-	transitionTable = make(map[readerState]transitionCallback, _sentinel-stateNull-1)
+	transitionTable = make(map[readerState]transitionCallback, stateSentinel-stateNull-1)
 	transitionTable[stateJoining] = onJoiningState
 	transitionTable[stateRegistration] = onRegisterParticipantState
 	transitionTable[stateAuthentication] = onAuthParticipantState
@@ -204,6 +204,11 @@ func (r *readerFSM) read(session *session) {
 }
 
 func (r *readerFSM) processCommand(session *session) bool {
+	// Don't process commands while in a joining or processing menu state
+	if matchState(r.state, stateJoining) || matchState(r.state, stateProcessingMenu) {
+		return false
+	}
+
 	result := commands.ParseCommand(r.buffer)
 	if result.Error != nil {
 		session.sendMsg(types.BuildSysMsg(result.Error.Error(), r.conn.ipAddr))
@@ -251,7 +256,7 @@ func (r *readerFSM) processCommand(session *session) bool {
 			}
 
 		case commands.CommandListCommands:
-			session.sendMsg(types.BuildSysMsg(commands.CommandsBuilder.String()))
+			session.sendMsg(types.BuildSysMsg(commands.CommandsBuilder.String(), r.conn.ipAddr))
 		}
 		return true
 	}

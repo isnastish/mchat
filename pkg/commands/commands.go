@@ -120,9 +120,9 @@ func init() {
 	CommandsBuilder.WriteString("commands:\n")
 
 	for _, cmd := range commandTable {
-		CommandsBuilder.WriteString(util.Fmtln("%-20s\t%s", cmd.name, cmd.desc))
+		CommandsBuilder.WriteString(util.Fmtln("\t%-20s\t%s", cmd.name, cmd.desc))
 		for _, opt := range cmd.options {
-			CommandsBuilder.WriteString(util.Fmtln("%-20s\t%s %s %s", "", opt.name, opt.arg, opt.hint))
+			CommandsBuilder.WriteString(util.Fmtln("\t%-20s\t%s %s %s", "", opt.name, opt.arg, opt.hint))
 		}
 		CommandsBuilder.WriteString("\r\n")
 	}
@@ -152,7 +152,6 @@ func ParseCommand(buffer *bytes.Buffer) *ParseResult {
 					for _, opt := range cmd.options {
 						if arguments[i] == opt.name {
 							if opt.name == "-channel" {
-								result.Error = &parseError{t: errorSuccess}
 								result.Channel = arguments[i+1]
 								result.Matched = true
 								break
@@ -166,7 +165,6 @@ func ParseCommand(buffer *bytes.Buffer) *ParseResult {
 									return result
 								}
 
-								result.Error = &parseError{t: errorSuccess}
 								result.Period = uint(count)
 								result.Matched = true
 								break
@@ -186,6 +184,7 @@ func ParseCommand(buffer *bytes.Buffer) *ParseResult {
 
 					optionIndex++
 				}
+				result.Matched = true
 				return result
 			}
 		}

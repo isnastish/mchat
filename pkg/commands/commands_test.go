@@ -25,6 +25,7 @@ func commandParseError(t *testing.T, command string, err errorType) {
 
 func validCommand(t *testing.T, command string, expectedtype CommandType) {
 	result := ParseCommand(str2bytes(command))
+	assert.True(t, result.Matched)
 	assert.Equal(t, result.CommandType, expectedtype)
 }
 
@@ -47,7 +48,8 @@ func TestErrorParsingACommand(t *testing.T) {
 	commandParseError(t, ":history -period -234", errorInvalidValue) // debug
 	commandParseError(t, ":history -period string", errorInvalidValue)
 	commandParseError(t, ":members -channel", errorArgumentNotSpecified)
-	commandParseError(t, ":members -channel Books", errorSuccess)
+	// nil on success
+	// commandParseError(t, ":members -channel Books", errorSuccess)
 }
 
 func TestValidCommands(t *testing.T) {
@@ -61,6 +63,7 @@ func TestValidCommands(t *testing.T) {
 	buf := bytes.NewBuffer(make([]byte, 0, len(cmd)))
 	buf.WriteString(cmd)
 	result := ParseCommand(buf)
+	assert.True(t, result.Matched)
 	assert.Equal(t, CommandDisplayHistory, result.CommandType)
 	assert.Equal(t, "Dragonflies", result.Channel)
 	assert.Equal(t, uint(8), result.Period)
@@ -69,6 +72,7 @@ func TestValidCommands(t *testing.T) {
 	buf.Truncate(0)
 	buf.WriteString(cmd)
 	result = ParseCommand(buf)
+	assert.True(t, result.Matched)
 	assert.Equal(t, CommandDisplayHistory, result.CommandType)
 	assert.Equal(t, uint(12), result.Period)
 
@@ -76,6 +80,7 @@ func TestValidCommands(t *testing.T) {
 	buf.Truncate(0)
 	buf.WriteString(cmd)
 	result = ParseCommand(buf)
+	assert.True(t, result.Matched)
 	assert.Equal(t, CommandListMembers, result.CommandType)
 	assert.Equal(t, "Books", result.Channel)
 }
