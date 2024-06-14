@@ -1,3 +1,5 @@
+// TODO: Add a capability for deleting single messages
+// and deleting all the messages in a channel and in a general chat.
 package backend
 
 import (
@@ -28,13 +30,9 @@ type Backend interface {
 	HasChannel(channelname string) bool
 	RegisterChannel(channel *types.Channel)
 	DeleteChannel(channelname string) bool
-	GetChatHistory() []*types.ChatMessage
-	GetChannelHistory(channelname string) []*types.ChatMessage
+	GetChatHistory(channelname ...string) []*types.ChatMessage
 	GetChannels() []*types.Channel
 	GetParticipants() []*types.Participant
-	// ChanelAddMember(channelname string, member string)
-	// TODO: Add a capability for deleting single messages
-	// and deleting all the messages in a channel and in a general chat.
 }
 
 type RedisConfig struct {

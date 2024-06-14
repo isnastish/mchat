@@ -24,3 +24,15 @@ options:
         enter option:
 ```
 Congratulations! You were able to successfully build and launch the application.
+
+**NOTE** It is crucial to run a client before a server, otherwise you will see the logs of client trying to connect multiple times, which will fail eventually:
+```log
+8:34AM INF Attemp 0 to connect failed, retrying in 2s
+8:34AM INF Attemp 1 to connect failed, retrying in 2s
+8:34AM INF Attemp 2 to connect failed, retrying in 2s
+8:34AM INF Attemp 3 to connect failed, retrying in 2s
+8:34AM INF Attemp 4 to connect failed, retrying in 2s
+8:34AM ERR Failed to connect
+```
+
+## Running with Redis backend

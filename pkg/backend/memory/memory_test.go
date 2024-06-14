@@ -75,9 +75,9 @@ func TestGetChannelHistory(t *testing.T) {
 
 	assert.Equal(t, len(storage.GetChatHistory()), 0)
 
-	booksChanHistory := storage.GetChannelHistory(testsetup.Channels[0].Name)
+	booksChanHistory := storage.GetChatHistory(testsetup.Channels[0].Name)
 	assert.True(t, testsetup.Match(booksChanHistory, testsetup.BooksChannelMessages, testsetup.ContainsMessage))
 
-	programmingChanHistory := storage.GetChannelHistory(testsetup.Channels[1].Name)
+	programmingChanHistory := storage.GetChatHistory(testsetup.Channels[1].Name)
 	assert.True(t, testsetup.Match(programmingChanHistory, testsetup.ProgrammingChannelMessages, testsetup.ContainsMessage))
 }

@@ -4,6 +4,7 @@
 // TODO: Explore Redis' transactions, maybe we wouldn't have to maintain a mutex.
 // TODO: GetChatHistory and GetChannelHistory have some duplications, they have to be combined into a single function.
 // TODO: Add metrics using otel (opentelementry).
+// TODO: Don't hash username and channel name when inserting into redis
 package redis
 
 import (
@@ -183,42 +184,6 @@ func (r *redisBackend) StoreMessage(message *types.ChatMessage) {
 	}
 }
 
-func (r *redisBackend) GetChatHistory() []*types.ChatMessage {
-	r.RLock()
-	defer r.RUnlock()
-
-	messageKey := "messages/general:"
-
-	if members := r.client.SMembers(r.ctx, messageKey).Val(); len(members) != 0 {
-		messages := make([]*types.ChatMessage, 0, len(members))
-		for _, messageid := range members { // O(n^2)
-			data := r.client.HGetAll(r.ctx, messageid).Val()
-			if len(data) == 0 {
-				log.Logger.Panic("Message %s not found", messageid)
-			}
-
-			message := &types.ChatMessage{}
-
-			value := reflect.ValueOf(message).Elem()
-			for i := 0; i < value.NumField(); i++ {
-				fieldname := value.Type().Field(i).Name
-				if fieldname == value.Type().Field(0).Name {
-					contents := data[fieldname]
-					buf := bytes.NewBuffer(make([]byte, 0, len(contents)))
-					buf.WriteString(contents)
-					value.Field(i).Set(reflect.ValueOf(buf))
-					continue
-				}
-				value.Field(i).Set(reflect.ValueOf(data[fieldname]))
-			}
-			message = (*types.ChatMessage)(value.Addr().UnsafePointer())
-			messages = append(messages, message)
-		}
-		return messages
-	}
-	return nil
-}
-
 // NOTE: Not a part of a public API yet.
 func (r *redisBackend) deleteMessages(channels ...string) {
 	r.Lock()
@@ -305,23 +270,29 @@ func (r *redisBackend) DeleteChannel(channelname string) bool {
 	return false
 }
 
-func (r *redisBackend) GetChannelHistory(channelname string) []*types.ChatMessage {
+func (r *redisBackend) GetChatHistory(channelname ...string) []*types.ChatMessage {
 	r.RLock()
 	defer r.RUnlock()
 
-	if !r.doesChannelExist(channelname) {
-		log.Logger.Panic("Failed to retrieve chat history, channel %s doesn't exist", channelname)
+	var messagesKey string
+
+	// Empty ("") channels name is treated the same as the channel not being specified,
+	// thus we have to return general chat's history
+	if len(channelname) > 0 && channelname[0] != "" {
+		if !r.doesChannelExist(channelname[0]) {
+			log.Logger.Panic("Failed to retrieve chat history, channel %s doesn't exist", channelname)
+		}
+		messagesKey = "messages/" + channelname[0] + ":"
+	} else {
+		messagesKey = "messages/general:"
 	}
 
-	messagesKey := "messages/" + channelname + ":"
-
-	if ids := r.client.SMembers(r.ctx, messagesKey).Val(); len(ids) != 0 {
-		messages := make([]*types.ChatMessage, 0, len(ids))
-		for _, messageId := range ids {
-			messageData := r.client.HGetAll(r.ctx, messageId).Val()
-
-			if len(messageData) == 0 {
-				log.Logger.Panic("Message id:%s not found", messageId)
+	if members := r.client.SMembers(r.ctx, messagesKey).Val(); len(members) != 0 {
+		messages := make([]*types.ChatMessage, 0, len(members))
+		for _, messageid := range members { // O(n^2)
+			data := r.client.HGetAll(r.ctx, messageid).Val()
+			if len(data) == 0 {
+				log.Logger.Panic("Message %s not found", messageid)
 			}
 
 			message := &types.ChatMessage{}
@@ -330,13 +301,13 @@ func (r *redisBackend) GetChannelHistory(channelname string) []*types.ChatMessag
 			for i := 0; i < value.NumField(); i++ {
 				fieldname := value.Type().Field(i).Name
 				if fieldname == value.Type().Field(0).Name {
-					contents := messageData[fieldname]
+					contents := data[fieldname]
 					buf := bytes.NewBuffer(make([]byte, 0, len(contents)))
 					buf.WriteString(contents)
 					value.Field(i).Set(reflect.ValueOf(buf))
 					continue
 				}
-				value.Field(i).Set(reflect.ValueOf(messageData[fieldname]))
+				value.Field(i).Set(reflect.ValueOf(data[fieldname]))
 			}
 			message = (*types.ChatMessage)(value.Addr().UnsafePointer())
 			messages = append(messages, message)

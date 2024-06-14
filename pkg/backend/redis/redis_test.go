@@ -134,12 +134,12 @@ func TestStoreChannelMessages(t *testing.T) {
 
 	defer func() {
 		backend.deleteMessages(testsetup.Channels[0].Name)
-		assert.Equal(t, len(backend.GetChannelHistory(testsetup.Channels[0].Name)), 0)
+		assert.Equal(t, len(backend.GetChatHistory(testsetup.Channels[0].Name)), 0)
 	}()
 	for _, msg := range testsetup.BooksChannelMessages {
 		backend.StoreMessage(&msg)
 	}
 
-	channelHistory := backend.GetChannelHistory(testsetup.Channels[0].Name)
+	channelHistory := backend.GetChatHistory(testsetup.Channels[0].Name)
 	assert.True(t, testsetup.Match(channelHistory, testsetup.BooksChannelMessages, testsetup.ContainsMessage))
 }
