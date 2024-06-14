@@ -1,5 +1,4 @@
 // TODO: Improve metrics (probably redesign).
-// TODO: Pass settings for redis and dynamoDB backends (should be part of Config).
 package session
 
 import (
@@ -136,7 +135,7 @@ func (s *session) Run() {
 	}
 }
 
-func (s *session) sendMessage(msg interface{}) {
+func (s *session) sendMsg(msg interface{}) {
 	switch msg := msg.(type) {
 	case *types.SysMessage:
 		s.sysMessages <- msg
@@ -152,49 +151,55 @@ func (s *session) sendMessage(msg interface{}) {
 func (s *session) handleConnection(conn *connection) {
 	reader := newReader(conn)
 
-	if reader._DEBUG_SkipUsedataProcessing {
+	if reader._DEBUG_SkipUserdataProcessing {
 		reader.displayChatHistory(s)
 	}
 
 	for {
-		if !reader._DEBUG_SkipUsedataProcessing {
+		if !reader._DEBUG_SkipUserdataProcessing {
 			if matchState(reader.state, stateJoining) || matchState(reader.state, stateProcessingMenu) {
-				s.sendMessage(types.BuildSysMsg(optionsStr, reader.conn.ipAddr))
+				s.sendMsg(types.BuildSysMsg(optionsStr, reader.conn.ipAddr))
 			}
 		}
 
 		reader.read(s)
 
-		if !reader._DEBUG_SkipUsedataProcessing {
-			switch {
-			case matchState(reader.state, stateJoining):
-				reader.onJoiningState(s)
+		if !reader.processCommand(s) {
 
-			case matchState(reader.state, stateProcessingMenu):
-				reader.onJoiningState(s)
+			if !reader._DEBUG_SkipUserdataProcessing {
+				// transitionTable[reader.state](reader, s)
+				// TODO: Use the transitionTable[reader.state](reader, s) instead of a giant switch statement
+				// we only need to make a look up in a table which invokes the corresponding callback.
+				switch {
+				case matchState(reader.state, stateJoining):
+					transitionTable[stateJoining](reader, s)
 
-			case matchState(reader.state, stateRegistration):
-				reader.onRegisterParticipantState(s)
+				case matchState(reader.state, stateProcessingMenu):
+					transitionTable[stateProcessingMenu](reader, s)
 
-			case matchState(reader.state, stateAuthentication):
-				reader.onAuthParticipantState(s)
+				case matchState(reader.state, stateRegistration):
+					transitionTable[stateRegistration](reader, s)
 
-			case matchState(reader.state, stateCreatingChannel):
-				reader.onCreateChannelState(s)
+				case matchState(reader.state, stateAuthentication):
+					transitionTable[stateAuthentication](reader, s)
 
-			case matchState(reader.state, stateSelectingChannel):
-				reader.onSelectChannelState(s)
+				case matchState(reader.state, stateCreatingChannel):
+					transitionTable[stateCreatingChannel](reader, s)
 
-			case matchState(reader.state, stateAcceptingMessages):
-				reader.onAcceptMessagesState(s)
+				case matchState(reader.state, stateSelectingChannel):
+					transitionTable[stateSelectingChannel](reader, s)
+
+				case matchState(reader.state, stateAcceptingMessages):
+					transitionTable[stateAcceptingMessages](reader, s)
+				}
+			} else {
+				reader.updateState(stateAcceptingMessages)
+				transitionTable[reader.state](reader, s)
 			}
-		} else {
-			reader.updateState(stateAcceptingMessages)
-			reader.onAcceptMessagesState(s)
 		}
 
 		if matchState(reader.state, stateDisconnecting) {
-			reader.onDisconnectState(s)
+			transitionTable[reader.state](reader, s)
 			break
 		}
 	}

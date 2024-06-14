@@ -142,22 +142,20 @@ func (m *memoryBackend) DeleteChannel(channelname string) bool {
 	return true
 }
 
-func (m *memoryBackend) GetChatHistory() []*types.ChatMessage {
-	m.RLock()
-	defer m.RUnlock()
-	return m.chatHistory
-}
-
-func (m *memoryBackend) GetChannelHistory(channelname string) []*types.ChatMessage {
+func (m *memoryBackend) GetChatHistory(channelname ...string) []*types.ChatMessage {
 	m.RLock()
 	defer m.RUnlock()
 
-	if !m.doesChannelExist(channelname) {
-		log.Logger.Panic("Failed to list chat history, channel %s doesn't exist", channelname)
+	// Empty ("") channels name is treated the same as the channel not being specified,
+	// thus we have to return general chat's history
+	if len(channelname) > 0 && channelname[0] != "" {
+		if !m.doesChannelExist(channelname[0]) {
+			log.Logger.Panic("Failed to list chat history, channel %s doesn't exist", channelname)
+		}
+		channel := m.channels[channelname[0]]
+		return channel.ChatHistory
 	}
-
-	channel := m.channels[channelname]
-	return channel.ChatHistory
+	return m.chatHistory
 }
 
 func (m *memoryBackend) GetChannels() []*types.Channel {

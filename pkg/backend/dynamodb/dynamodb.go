@@ -4,18 +4,14 @@ import (
 	"sync"
 
 	_ "github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	_ "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	_ "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
 	"github.com/isnastish/chat/pkg/backend"
-	_ "github.com/isnastish/chat/pkg/logger"
 	"github.com/isnastish/chat/pkg/types"
-	_ "github.com/isnastish/chat/pkg/utilities"
-	_ "github.com/isnastish/chat/pkg/validation"
 )
 
 type dynamodbBackend struct {
-	client *dynamodb.Client
 	sync.RWMutex
 }
 
@@ -49,11 +45,7 @@ func (d *dynamodbBackend) DeleteChannel(channelname string) bool {
 	return false
 }
 
-func (d *dynamodbBackend) GetChatHistory() []*types.ChatMessage {
-	return nil
-}
-
-func (d *dynamodbBackend) GetChannelHistory(channelname string) []*types.ChatMessage {
+func (d *dynamodbBackend) GetChatHistory(channelname ...string) []*types.ChatMessage {
 	return nil
 }
 
