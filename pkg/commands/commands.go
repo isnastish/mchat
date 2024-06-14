@@ -1,3 +1,4 @@
+// TODO: Better error messages
 package commands
 
 import (
@@ -56,18 +57,19 @@ type option struct {
 }
 
 type command struct {
+	_type   CommandType
 	name    string
 	desc    string
 	options []*option
-	_type   CommandType
 }
 
 var errorsTable []string
-var commandTable []*command // replace with a map as well?
+var commandTable []*command
 var CommandsBuilder strings.Builder
 
-func newCommand(name, desc string, options ...*option) *command {
+func newCommand(cmdtype CommandType, name, desc string, options ...*option) *command {
 	return &command{
+		_type:   cmdtype,
 		name:    name,
 		desc:    desc,
 		options: options,
@@ -86,19 +88,26 @@ func index(cmd CommandType) int {
 	return int(cmd - CommandDisplayMenu)
 }
 
+func (e *parseError) Error() string {
+	if e.t <= errorSuccess || e.t >= errorSentinel {
+		log.Logger.Panic("Index out of range")
+	}
+	return util.Fmtln("error: %s", errorsTable[e.t]+" "+e.msg)
+}
+
 func init() {
 	commandTable = make([]*command, commandSentinel-CommandNull-1)
 
-	commandTable[index(CommandDisplayMenu)] = newCommand(":menu", "Display menu")
+	commandTable[index(CommandDisplayMenu)] = newCommand(CommandDisplayMenu, ":menu", "Display menu")
 	commandTable[index(CommandDisplayHistory)] =
-		newCommand(":history", "Display chat history").
+		newCommand(CommandDisplayHistory, ":history", "Display chat history").
 			addOption("-channel", "<name>", "Channel's name").
 			addOption("-period", "<n>", "Time period")
 	commandTable[index(CommandListMembers)] =
-		newCommand(":members", "Display chat members").
+		newCommand(CommandListMembers, ":members", "Display chat members").
 			addOption("-channel", "<name>", "Channel's name")
-	commandTable[index(CommandListChannels)] = newCommand(":channels", "Display all channels")
-	commandTable[index(CommandListCommands)] = newCommand(":commands", "Display commands")
+	commandTable[index(CommandListChannels)] = newCommand(CommandListChannels, ":channels", "Display all channels")
+	commandTable[index(CommandListCommands)] = newCommand(CommandListCommands, ":commands", "Display commands")
 
 	errorsTable = make([]string, errorSentinel-errorSuccess)
 	errorsTable[errorSuccess] = "Success"
@@ -119,19 +128,10 @@ func init() {
 	}
 }
 
-// TODO: Handle zero error, because the look up will fail,
-// probably introduce a sentinel node as well
-func (e *parseError) Error() string {
-	return util.Fmtln("error: %s", errorsTable[e.t]+" "+e.msg)
-}
-
 func ParseCommand(buffer *bytes.Buffer) *ParseResult {
-	builder := strings.Builder{}
-	builder.WriteString(buffer.String())
-
 	result := &ParseResult{CommandType: commandSentinel}
-	if strings.HasPrefix(builder.String(), ":") {
-		arguments := strings.Split(builder.String(), " ")
+	if strings.HasPrefix(buffer.String(), ":") {
+		arguments := strings.Split(buffer.String(), " ")
 		for _, cmd := range commandTable {
 			if strings.ToLower(arguments[0]) == cmd.name {
 				result.CommandType = cmd._type
@@ -152,6 +152,7 @@ func ParseCommand(buffer *bytes.Buffer) *ParseResult {
 					for _, opt := range cmd.options {
 						if arguments[i] == opt.name {
 							if opt.name == "-channel" {
+								result.Error = &parseError{t: errorSuccess}
 								result.Channel = arguments[i+1]
 								result.Matched = true
 								break
@@ -165,6 +166,7 @@ func ParseCommand(buffer *bytes.Buffer) *ParseResult {
 									return result
 								}
 
+								result.Error = &parseError{t: errorSuccess}
 								result.Period = uint(count)
 								result.Matched = true
 								break
