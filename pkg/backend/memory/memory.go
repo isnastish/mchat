@@ -2,7 +2,6 @@ package memory
 
 import (
 	"bytes"
-	"strings"
 	"sync"
 
 	"github.com/isnastish/chat/pkg/logger"
@@ -69,10 +68,10 @@ func (m *memoryBackend) AuthParticipant(participant *types.Participant) bool {
 	m.RLock()
 	defer m.RUnlock()
 
-	participant, exists := m.participants[participant.Username]
+	foundParticipant, exists := m.participants[participant.Username]
 	if exists {
 		passwordHash := util.Sha256Checksum([]byte(participant.Password))
-		return strings.EqualFold(participant.Password, passwordHash)
+		return passwordHash == foundParticipant.Password
 	}
 
 	return false

@@ -16,17 +16,19 @@ func TestMain(m *testing.M) {
 	var result int
 	var redisHasStarted bool
 
-	redisHasStarted, _ = testsetup.SetupRedisMock()
-	result = m.Run()
+	if os.Getenv("CI") == "" {
+		redisHasStarted, _ = testsetup.SetupRedisMock()
+		result = m.Run()
 
-	// Make sure we always tear down the running redis-mock container
-	// if one of the tests panics.
-	defer func() {
-		if redisHasStarted {
-			testsetup.TeardownRedisMock()
-		}
-		os.Exit(result)
-	}()
+		// Make sure we always tear down the running redis-mock container
+		// if one of the tests panics.
+		defer func() {
+			if redisHasStarted {
+				testsetup.TeardownRedisMock()
+			}
+			os.Exit(result)
+		}()
+	}
 }
 
 var redisConfig = backend.RedisConfig{

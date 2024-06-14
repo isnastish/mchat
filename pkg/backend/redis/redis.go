@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"context"
 	"reflect"
-	"strings"
 	"sync"
 	"time"
 
@@ -140,7 +139,7 @@ func (r *redisBackend) AuthParticipant(participant *types.Participant) bool {
 		passwordFiledName := reflect.TypeOf(participant).Elem().Field(1).Name
 		passwordHash := r.client.HGet(r.ctx, participantHash, passwordFiledName)
 		if passwordHash.Val() != "" {
-			return strings.EqualFold(util.Sha256Checksum([]byte(participant.Password)), passwordHash.Val())
+			return util.Sha256Checksum([]byte(participant.Password)) == passwordHash.Val()
 		}
 	}
 

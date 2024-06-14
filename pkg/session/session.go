@@ -3,6 +3,7 @@ package session
 
 import (
 	"net"
+	"net/http"
 	"os"
 	"time"
 
@@ -46,6 +47,8 @@ type session struct {
 }
 
 func CreateSession(config Config) *session {
+	// TODO: TLS connection
+
 	listener, err := net.Listen(config.Network, config.Addr)
 	if err != nil {
 		log.Logger.Error("Listener creation failed: %v", err)

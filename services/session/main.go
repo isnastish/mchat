@@ -23,20 +23,21 @@ func main() {
 
 	flag.Parse()
 
-	switch strings.ToLower(*backendType) {
+	*backendType = strings.ToLower(*backendType)
+	switch *backendType {
 	case backend.BackendTypes[backend.BackendTypeRedis]:
-		log.Logger.Info("Running redis backend")
 		config.BackendType = backend.BackendTypeRedis
 		config.RedisConfig = &backend.RedisConfig{
 			Endpoint: *redisEndpoint,
 			Username: *redisUsername,
 			Password: *redisPassword,
 		}
+		log.Logger.Info("Running redis backend")
 
 	case backend.BackendTypes[backend.BackendTypeDynamodb]:
-		log.Logger.Info("Running dynamodb backend")
 		config.BackendType = backend.BackendTypeDynamodb
 		config.DynamodbConfig = &backend.DynamodbConfig{}
+		log.Logger.Info("Running dynamodb backend")
 
 	case backend.BackendTypes[backend.BackendTypeMemory]:
 		log.Logger.Info("Running  memory backend")
