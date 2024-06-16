@@ -10,15 +10,18 @@ RUN CGO_ENABLED=0 GOOS=linux go build -v -o /go/bin/session github.com/isnastish
 # go test ./... tests all the packages
 RUN go test -v -count=1 \
     github.com/isnastish/chat/pkg/commands \
-    github.com/isnastish/chat/pkg/validation\ 
+    github.com/isnastish/chat/pkg/validation \
     github.com/isnastish/chat/pkg/backend/memory
 
 # Production container
 # We cannot run redis mock inside a docker container, because we would have \
 # to install docker inside that container 
 FROM golang:1.22 as run-env
-COPY --from=build-env /go/bin/session /session/
+
+COPY --from=build-env /go/bin/session .
+COPY --from=build-env /go/src/github.com/isnastish/chat/services/session/*.pem . 
+
 EXPOSE 8080/tcp
 
-ENTRYPOINT [ "/session/session" ]
-# CMD [ "--backend", "redis", "--redis-endpoint", "localhost:6379"]
+ENTRYPOINT [ "./session" ]
+CMD [ "--backend", "memory" ]

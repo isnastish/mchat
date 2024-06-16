@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"strings"
 
@@ -16,6 +17,8 @@ func main() {
 	flag.StringVar(&config.Addr, "address", ":8080", "address to listen in")
 	flag.DurationVar(&config.SessionTimeout, "sessionTimeout", 86400 /*24h*/, "time for the session to tear down if nobody connected")
 	flag.DurationVar(&config.ParticipantTimeout, "participantTimeout", 86400, "time to be elapsed (in seconds) for the participant to be manually disconnected")
+	certFile := flag.String("cert", "cert.pem", "Path to the cert.pem file")
+	keyFile := flag.String("key", "key.pem", "Path to the key.pem file")
 	backendType := flag.String("backend", "memory", "Backend type for persisting the data. Possible types are (redis|dynamodb|memory).")
 	redisEndpoint := flag.String("redis-endpoint", "", "Redis endpoint")
 	redisUsername := flag.String("redis-username", "", "Redis username")
@@ -47,6 +50,13 @@ func main() {
 		log.Logger.Panic("Unknown backend %s", *backendType)
 	}
 
-	s := session.CreateSession(config)
+	cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
+	if err != nil {
+		log.Logger.Panic("Failed to parse certificates %v", err)
+	}
+
+	config.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+
+	s := session.CreateSession(&config)
 	s.Run()
 }

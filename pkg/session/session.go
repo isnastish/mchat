@@ -2,9 +2,8 @@
 package session
 
 import (
+	"crypto/tls"
 	"net"
-	"net/http"
-	"os"
 	"time"
 
 	"github.com/isnastish/chat/pkg/backend"
@@ -18,6 +17,8 @@ import (
 type Config struct {
 	Network string
 	Addr    string
+
+	TLSConfig *tls.Config
 
 	SessionTimeout     time.Duration
 	ParticipantTimeout time.Duration
@@ -34,7 +35,7 @@ type metrics struct {
 }
 
 type session struct {
-	config                 Config
+	config                 *Config
 	listener               net.Listener
 	connMap                *connectionMap
 	shutdownTimer          *time.Timer
@@ -46,13 +47,10 @@ type session struct {
 	metrics                metrics
 }
 
-func CreateSession(config Config) *session {
-	// TODO: TLS connection
-
-	listener, err := net.Listen(config.Network, config.Addr)
+func CreateSession(config *Config) *session {
+	listener, err := tls.Listen(config.Network, config.Addr, config.TLSConfig)
 	if err != nil {
-		log.Logger.Error("Listener creation failed: %v", err)
-		os.Exit(1)
+		log.Logger.Panic("Failed to create net.Listener %v", err)
 	}
 
 	var storage backend.Backend
