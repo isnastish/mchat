@@ -1,7 +1,6 @@
 {
     "version": "0.2.0",
     "configurations": [
-        // Session with redis backend
         {
             "name": "Session Redis backend",
             "type": "go",
@@ -17,8 +16,6 @@
                 "localhost:6379"
             ] 
         }, 
-
-        // Session with memory backend
         {
             "name": "Session Memory backend",
             "type": "go",
@@ -32,8 +29,6 @@
                 "memory", 
             ] 
         },
-
-        // Session with Dynamodb backend
         {
             "name": "Session Dynamodb backend",
             "type": "go",
@@ -47,8 +42,6 @@
                 "dynamodb",
             ] 
         },
-
-        // Client
         {
             "name": "Client",
             "type": "go",
