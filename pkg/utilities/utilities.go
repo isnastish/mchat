@@ -1,7 +1,6 @@
 package util
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"net"
@@ -16,18 +15,6 @@ func Sha256Checksum(bytes []byte) string {
 
 func endOfLine(src string) string {
 	return src + "\r\n"
-}
-
-func WriteBytes(conn net.Conn, buffer *bytes.Buffer) (int, error) {
-	var bWritten int
-	for bWritten < buffer.Len() {
-		n, err := conn.Write(buffer.Bytes())
-		if err != nil {
-			return bWritten, err
-		}
-		bWritten += n
-	}
-	return bWritten, nil
 }
 
 func TimeNowStr() string {
@@ -48,4 +35,19 @@ func TrimWhitespaces(src []byte) []byte {
 
 func Sleep(duration int64) {
 	<-time.After(time.Duration(duration) * time.Millisecond)
+}
+
+func WriteBytesToConn(conn net.Conn, bytes []byte, size int) (int, error) {
+	if size < 0 {
+		panic("Cannot write negative number of bytes")
+	}
+	var bytesWritten int
+	for bytesWritten < size {
+		thisWrite, err := conn.Write(bytes)
+		if err != nil {
+			return bytesWritten, err
+		}
+		bytesWritten += thisWrite
+	}
+	return bytesWritten, nil
 }

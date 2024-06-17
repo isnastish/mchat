@@ -1,6 +1,7 @@
+README.md
 .dockerignore
 .git
 .gitignore
 .vscode
 **/*.Dockerfile
-
+Dockerfile

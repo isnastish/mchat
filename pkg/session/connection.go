@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"context"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -34,9 +35,11 @@ type connection struct {
 	state                  connectionState
 }
 
+// TODO: Add test for broadcast message deadline
 type connectionMap struct {
-	connections map[string]*connection
-	mu          sync.RWMutex
+	connections          map[string]*connection
+	broadcastMsgDeadline time.Duration
+	sync.RWMutex
 }
 
 func init() {
@@ -62,7 +65,8 @@ func newConn(conn net.Conn, timeout time.Duration) *connection {
 
 func newConnectionMap() *connectionMap {
 	return &connectionMap{
-		connections: make(map[string]*connection),
+		connections:          make(map[string]*connection),
+		broadcastMsgDeadline: 10 * time.Second,
 	}
 }
 
@@ -103,14 +107,14 @@ func (cm *connectionMap) _doesConnExist(connIpAddr string) bool {
 }
 
 func (cm *connectionMap) addConn(conn *connection) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.Lock()
+	defer cm.Unlock()
 	cm.connections[conn.ipAddr] = conn
 }
 
 func (cm *connectionMap) removeConn(connIpAddr string) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.Lock()
+	defer cm.Unlock()
 
 	if !cm._doesConnExist(connIpAddr) {
 		log.Logger.Panic("Connection {%s} doesn't exist", connIpAddr)
@@ -120,8 +124,8 @@ func (cm *connectionMap) removeConn(connIpAddr string) {
 }
 
 func (cm *connectionMap) hasConnectedParticipant(username string) bool {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
+	cm.RLock()
+	defer cm.RUnlock()
 
 	for _, conn := range cm.connections {
 		if conn.matchState(connectedState) {
@@ -134,14 +138,14 @@ func (cm *connectionMap) hasConnectedParticipant(username string) bool {
 }
 
 func (cm *connectionMap) empty() bool {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
+	cm.RLock()
+	defer cm.RUnlock()
 	return len(cm.connections) == 0
 }
 
 func (cm *connectionMap) markAsConnected(connIpAddr string) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.Lock()
+	defer cm.Unlock()
 
 	if !cm._doesConnExist(connIpAddr) {
 		log.Logger.Panic("Connection {%s} doesn't exist", connIpAddr)
@@ -154,8 +158,8 @@ func (cm *connectionMap) markAsConnected(connIpAddr string) {
 func (cm *connectionMap) broadcastMessage(msg interface{}) int {
 	var sentCount int
 
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
+	cm.RLock()
+	defer cm.RUnlock()
 
 	switch msg := msg.(type) {
 	case *types.ChatMessage:
@@ -169,36 +173,32 @@ func (cm *connectionMap) broadcastMessage(msg interface{}) int {
 					continue
 				}
 
-				n, err := util.WriteBytes(conn.netConn, canonChatMsg)
-				if err != nil || (n != msg.Contents.Len()) {
-					log.Logger.Error("Failed to send a chat message to the participant: %s", conn.participant.Username)
-				} else {
-					sentCount++
+				hitDeadline := cm.writeWithDeadline(conn, canonChatMsg)
+				if hitDeadline {
+					conn.cancel()
+					return 0
 				}
 			}
 		}
 
 	case *types.SysMessage:
-		// canonSysMsg := bytes.NewBuffer([]byte(util.Fmtln("{system:%s} %s", msg.SentTime, msg.Contents.String())))
 		if msg.Recipient != "" {
 			conn, exists := cm.connections[msg.Recipient]
 			if exists {
-				n, err := util.WriteBytes(conn.netConn, msg.Contents)
-				if err != nil || (n != msg.Contents.Len()) {
-					log.Logger.Error("Failed to send a system message to the connection ip: %s", conn.ipAddr)
-				} else {
-					sentCount++
+				hitDeadline := cm.writeWithDeadline(conn, msg.Contents)
+				if hitDeadline {
+					conn.cancel()
+					return 0
 				}
 			}
 		} else {
-			// A case where messages about participants leaving broadcasted to all the other connected participants
+			// The case where messages about participants leaving broadcasted to all the other connected participants
 			for _, conn := range cm.connections {
 				if conn.matchState(connectedState) {
-					n, err := util.WriteBytes(conn.netConn, msg.Contents)
-					if err != nil || (n != msg.Contents.Len()) {
-						log.Logger.Error("Failed to send a system message to the participant: %s", conn.participant.Username)
-					} else {
-						sentCount++
+					hitDeadline := cm.writeWithDeadline(conn, msg.Contents)
+					if hitDeadline {
+						conn.cancel()
+						return 0
 					}
 				}
 			}
@@ -209,4 +209,37 @@ func (cm *connectionMap) broadcastMessage(msg interface{}) int {
 	}
 
 	return sentCount
+}
+
+func (cm *connectionMap) writeWithDeadline(conn *connection, bytesBuffer *bytes.Buffer) bool {
+	deadlineSig := make(chan struct{})
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(cm.broadcastMsgDeadline))
+	defer cancel()
+	go func() {
+		select {
+		case <-ctx.Done():
+			conn.netConn.Close()
+			close(deadlineSig)
+		}
+	}()
+
+	// TODO: We have to put a connection into a disconnected state, otherwise the server doesn't know
+	// that the connection was close and will try to send a message
+	bytesSent, err := util.WriteBytesToConn(conn.netConn, bytesBuffer.Bytes(), bytesBuffer.Len())
+	if err != nil && err != io.EOF {
+		select {
+		case <-deadlineSig:
+			log.Logger.Error("Timeout sending a message %s", bytesBuffer.String())
+		default:
+			log.Logger.Error("Failed to send a system message %v", err)
+		}
+		return true
+	} else if bytesSent != bytesBuffer.Len() {
+		log.Logger.Error("Partially sent data, expected %d, sent %d, contents %s",
+			bytesBuffer.Len(), bytesSent, bytesBuffer.String(),
+		)
+	} else {
+		// sentCount++
+	}
+	return false
 }

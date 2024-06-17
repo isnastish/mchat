@@ -4,7 +4,7 @@ FROM golang:1.22 as build-env
 WORKDIR /go/src/github.com/isnastish/chat/services/session
 ADD . /go/src/github.com/isnastish/chat/services/session
 
-RUN CGO_ENABLED=0 GOOS=linux go build -v -o /go/bin/session github.com/isnastish/chat/services/session
+RUN CGO_ENABLED=0 GOOS=linux go build -a -v -o /go/bin/session github.com/isnastish/chat/services/session
 
 # More about go test command https://pkg.go.dev/cmd/go#hdr-Test_packages
 # go test ./... tests all the packages

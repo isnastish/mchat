@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -22,6 +23,7 @@ type Config struct {
 	Network      string
 	Addr         string
 	RetriesCount int
+	TLSConfig    *tls.Config
 }
 
 type client struct {
@@ -48,7 +50,7 @@ func CreateClient(config *Config) *client {
 
 func (c *client) tryConnect(delay time.Duration) (net.Conn, bool) {
 	for retries := 0; ; retries++ {
-		sessionConn, err := net.Dial(c.config.Network, c.config.Addr)
+		sessionConn, err := tls.Dial(c.config.Network, c.config.Addr, c.config.TLSConfig)
 		if err == nil {
 			log.Logger.Info("Connected to %s", sessionConn.RemoteAddr().String())
 			return sessionConn, true
@@ -82,7 +84,7 @@ func (c *client) Run() {
 			fmt.Printf("%s", msg.Contents.String())
 
 		case msg := <-c.outgoingMessages:
-			util.WriteBytes(c.remoteConn, msg.Contents)
+			util.WriteBytesToConn(c.remoteConn, msg.Contents.Bytes(), msg.Contents.Len())
 
 		case <-c.ctx.Done():
 			return

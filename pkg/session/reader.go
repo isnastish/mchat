@@ -61,7 +61,6 @@ const (
 	substateReadingPassword
 	substateReadingEmailAddress
 	substateReadingChannnelDesc
-	// substate_Reading        readerSubstate = 0x5
 )
 
 type readerFSM struct {
@@ -570,8 +569,7 @@ func onDisconnectState(reader *readerFSM, session *session) {
 
 	log.Logger.Info("Disconnected: %s", reader.conn.ipAddr)
 
-	disconnectedUsername := reader.conn.participant.Username
-
+	leftParticipantUsername := reader.conn.participant.Username
 	// If the context hasn't been canceled yet. Probably the client has chosen to exit the session.
 	// We need to invoke cancel() procedure in order for the disconnectIfIdle() goroutine to finish.
 	// That prevents us from having go leaks.
@@ -583,7 +581,7 @@ func onDisconnectState(reader *readerFSM, session *session) {
 
 	// Broadcast message to everyone containing a name of who was disconnected
 	session.sendMsg(
-		types.BuildSysMsg(util.Fmtln("{server: %s} Participant %s disconnected", util.TimeNowStr(), disconnectedUsername)),
+		types.BuildSysMsg(util.Fmtln("{server: %s} Participant %s disconnected", util.TimeNowStr(), leftParticipantUsername)),
 	)
 }
 

@@ -14,7 +14,8 @@
                 "redis", 
                 "--redis-endpoint",
                 "localhost:6379"
-            ] 
+            ], 
+            "cwd": "${workspaceFolder}"  
         }, 
         {
             "name": "Session Memory backend",
@@ -27,7 +28,8 @@
                 "localhost:8080",
                 "--backend", 
                 "memory", 
-            ] 
+            ], 
+            "cwd": "${workspaceFolder}" 
         },
         {
             "name": "Session Dynamodb backend",
@@ -40,7 +42,8 @@
                 "localhost:8080",
                 "--backend", 
                 "dynamodb",
-            ] 
+            ], 
+            "cwd": "${workspaceFolder}"  
         },
         {
             "name": "Client",
@@ -51,7 +54,8 @@
             "args": [
                 "--retriesCount", 
                 "3"
-            ] 
+            ], 
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

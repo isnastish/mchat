@@ -1,6 +1,8 @@
 module github.com/isnastish/chat
 
-go 1.21.4
+go 1.22.3
+
+toolchain go1.22.4
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
@@ -25,6 +27,7 @@ require (
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
+	github.com/isnastish/kvs v0.0.0-20240616080956-10938371dd3a // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
